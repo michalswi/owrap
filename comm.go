@@ -22,4 +22,12 @@ var allowedCommands = map[string]bool{
 	"tail":       true,
 	"traceroute": true,
 	"dig":        true,
+	"nslookup":   true,
+	"wc":         true,
+	"whois":      true,
+	"sort":       true,
+	"uniq":       true,
+	"netcat":     true,
+	"telnet":     true,
+	"nc":         true,
 }
