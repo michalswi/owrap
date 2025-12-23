@@ -1,0 +1,25 @@
+package main
+
+var allowedCommands = map[string]bool{
+	"ls":         true,
+	"pwd":        true,
+	"cat":        true,
+	"curl":       true,
+	"ping":       true,
+	"nmap":       true,
+	"ffuf":       true,
+	"subfinder":  true,
+	"httpx":      true,
+	"while":      true,
+	"echo":       true,
+	"for":        true,
+	"chmod":      true,
+	"wget":       true,
+	"arp":        true,
+	"find":       true,
+	"grep":       true,
+	"head":       true,
+	"tail":       true,
+	"traceroute": true,
+	"dig":        true,
+}
