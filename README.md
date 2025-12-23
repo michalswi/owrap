@@ -39,7 +39,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.1.1 - @michalswi
+	v0.2.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -53,6 +53,7 @@ Available commands:
   /up           Show app uptime
   /s, /stats    Show session stats (counts, chars, last command)
   /last         Show last prompt + model answer
+  /sysprompt    Show current system prompt
   /save         Save current session to /tmp as JSON (includes cached blocks)
   /p [DELIM]    Paste multi-line input; finish with a line containing only DELIM (default EOF)
   /cache        List cached (not sent) blocks
@@ -61,7 +62,7 @@ Available commands:
   /auto-off     [default] Disable automatic analysis after commands
   /execfile P   Execute each non-empty line in file P (no analysis)
 Model-run allowed commands:
-  [arp, cat, chmod, curl, dig, echo, ffuf, find, for, grep, head, httpx, ls, nmap, ping, pwd, subfinder, tail, traceroute, wget, while]
+  [arp, cat, chmod, curl, dig, echo, ffuf, find, for, grep, head, httpx, ls, nc, netcat, nmap, nslookup, ping, pwd, sort, subfinder, tail, telnet, traceroute, uniq, wc, wget, while, whois]
 ------------------------------------------------------------
 ```
 
@@ -86,13 +87,12 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 
 - default **URL** to connect to Ollama is `http://localhost:11434/api/chat`. It might be changed using env var `OLLAMA_URL`  
 - default **local LLM model** is `gemma3:4b`. It might be changed using env var `OLLAMA_MODEL`
-- default **system prompt** is defined [here](./vars.go). It might be changed using env var `SYSTEM_PROMPT` or using predefined prompts from [here](./prompts/prompts.txt)
-
+- default **system prompt** is defined [here](./vars.go). By default the built-in prompt is used; set env var `SYSTEM_PROMPT` to a prompt file path (e.g., [prompts/recon.txt](./prompts/recon.txt)) to load it instead (falls back to default if the file cannot be read).
 
 
 ### > examples
 
-run app
+**adjust** the system prompt for you needs. it's **very** important because your answers depends on it. run app.
 
 ```
 $ ./owrap
@@ -103,7 +103,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.1.1 - @michalswi
+	v0.2.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -113,22 +113,15 @@ Type '/h' for help/shortcuts.
 ```
 ------------------------------------------------------------
 You: hi, what model are you?
-[Running]: echo "Hello! I am Gemma, a large language model created by the Gemma team at Google."
-[Command output]:
-"Hello! I am Gemma, a large language model created by the Gemma team at Google."
-
+Assistant: I'm Gemma, a large language model created by the Gemma team at Google DeepMind. I'm an open weights model, which means I'm widely available to the public.
 ------------------------------------------------------------
-You: hi, what model are you?
-Assistant: I'm Gemma, a large language model created by the Gemma team at Google.
-------------------------------------------------------------
-You: /stats
+You: /s
 Session stats:
-  User messages:      2
+  User messages:      1
   Assistant messages: 1
-  Commands run:       1
-  User chars total:   46
-  Assistant chars:    70
-  Last command:       echo "Hello! I am Gemma, a large language model created by the Gemma team at Google."
+  Commands run:       0
+  User chars total:   23
+  Assistant chars:    154
 ------------------------------------------------------------
 ```
 
@@ -139,17 +132,26 @@ You: /auto-on
 Auto-analysis enabled (after commands).
 ------------------------------------------------------------
 You: check the actual weather on this website wttr.in/wroclaw
-[Running]: curl -s wttr.in/wroclaw
+Assistant: I am unable to directly access external websites or execute shell commands to retrieve real-time information like weather data. Therefore, I cannot check the weather on wttr.in/wroclaw.
+------------------------------------------------------------
+You: check the actual weather on this website wttr.in/wroclaw. use curl.
+[Running]: curl wttr.in/wroclaw
 [Command output]:
 Weather report: wroclaw
 
                 Overcast
        .--.     +2(-2) °C
-    .-(    ).   ← 17 km/h
+    .-(    ).   ↙ 19 km/h
    (___.__)__)  10 km
                 0.0 mm
 (...)
-Assistant (analysis): The wttr.in forecast for Wrocław, Poland shows overcast conditions with temperatures ranging from -3°C to +3°C over the next three days (Tuesday, Wednesday, and Thursday). Winds will be between 17-34 km/h. Precipitation is minimal, with less than 1mm expected. The forecast transitions to sunny conditions on Thursday and Friday, with clear skies.
+Assistant (analysis): {"action": "answer", "text": "The wttr.in weather report for Wrocław, Poland indicates the following:
+
+*   **Current Conditions:** Overcast.
+*   **Temperature:** +2°C (feels like -2°C)
+*   **Wind:** 19 km/h (↙)
+*   **Precipitation:** 0.0 mm.
+*   **Forecast:** The forecast for the next few days (Tue-Thu) shows sunny conditions with temperatures ranging from -4°C to -3°C and winds between 9-27 km/h. The report also provides a link to @igor_chubin for further updates."}
 ```
 
 **example2** - to allow specific commands to be run you have to adjust them in [this file](./comm.go#L3)
@@ -163,7 +165,7 @@ Assistant (analysis): The command 'nslookup' was blocked. This likely indicates 
 ------------------------------------------------------------
 ```
 
-**example3** - multi-line input + what to do
+**example3** - multi-line input + what to do (after EOF) add "execute and analyze"
 ```
 ------------------------------------------------------------
 You: /p

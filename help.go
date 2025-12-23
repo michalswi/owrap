@@ -36,6 +36,9 @@ func handleSlashCommand(input string, stats *Stats) bool {
 	case "/last":
 		printLastQA()
 		return true
+	case "/sysprompt":
+		printSystemPrompt()
+		return true
 	case "/save":
 		fmt.Println(info("Saving session..."))
 		session := buildSession(modelName, stats)
@@ -68,6 +71,7 @@ func printHelp() {
 	fmt.Println("  /up           Show app uptime")
 	fmt.Println("  /s, /stats    Show session stats (counts, chars, last command)")
 	fmt.Println("  /last         Show last prompt + model answer")
+	fmt.Println("  /sysprompt    Show current system prompt")
 	fmt.Println("  /save         Save current session to /tmp as JSON (includes cached blocks)")
 	fmt.Println("  /p [DELIM]    Paste multi-line input; finish with a line containing only DELIM (default EOF)")
 	fmt.Println("  /cache        List cached (not sent) blocks")
@@ -77,4 +81,9 @@ func printHelp() {
 	fmt.Println("  /execfile P   Execute each non-empty line in file P (no analysis)")
 	fmt.Println(accent("Model-run allowed commands:"))
 	fmt.Printf("  [%s]\n", strings.Join(allowedCommandsList(), ", "))
+}
+
+func printSystemPrompt() {
+	fmt.Println(accent("Current system prompt:"))
+	fmt.Println(systemPrompt)
 }
