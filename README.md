@@ -86,6 +86,9 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 
 - default **URL** to connect to Ollama is `http://localhost:11434/api/chat`. It might be changed using env var `OLLAMA_URL`  
 - default **local LLM model** is `gemma3:4b`. It might be changed using env var `OLLAMA_MODEL`
+- default **system prompt** is defined [here](./vars.go). It might be changed using env var `SYSTEM_PROMPT` or using predefined prompts from [here](./prompts/prompts.txt)
+
+
 
 ### > examples
 
@@ -197,7 +200,7 @@ Analysis:
 </details>
 
 
-<summary><h2># Disclaimer</h2></summary>
+## \# Disclaimer
 
 Important: Read This Before Using
 
