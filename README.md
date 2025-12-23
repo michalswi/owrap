@@ -28,7 +28,21 @@ it’s a local Go CLI that:
 <details>
 <summary><h2># Help</h2></summary>
 
+run app
+
 ```
+$ ./owrap
+
+ ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
+██╔═══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗
+██║   ██║██║ █╗ ██║██████╔╝███████║██████╔╝
+██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
+╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
+ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
+	v0.1.0 - @michalswi
+
+Type '/q' to quit.
+Type '/h' for help/shortcuts.
 ------------------------------------------------------------
 You: /h
 Available commands:
@@ -181,3 +195,10 @@ Analysis:
 ```
 
 </details>
+
+
+<summary><h2># Disclaimer</h2></summary>
+
+Important: Read This Before Using
+
+This tool is designed for educational purposes. Not for malicious or illegal activities. Users are solely responsible for how they use this tool. The developers are not liable for any misuse or damage caused.
