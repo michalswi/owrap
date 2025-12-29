@@ -3,10 +3,13 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"embed"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"os/exec"
@@ -14,6 +17,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/michalswi/color"
@@ -23,6 +27,53 @@ type ChatMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
+
+//go:embed webui_static/*
+var webStatic embed.FS
+
+type webSession struct {
+	ID        string
+	Messages  []ChatMessage
+	CreatedAt time.Time
+	Stats     Stats
+}
+
+type webSessionStore struct {
+	mu       sync.Mutex
+	sessions map[string]*webSession
+}
+
+func newWebSessionStore() *webSessionStore {
+	return &webSessionStore{sessions: make(map[string]*webSession)}
+}
+
+func (s *webSessionStore) get(id string) (*webSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[id]
+	return sess, ok
+}
+
+func (s *webSessionStore) create() *webSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := fmt.Sprintf("sess_%d", time.Now().UnixNano())
+	sess := &webSession{ID: id, CreatedAt: time.Now()}
+	s.sessions[id] = sess
+	return sess
+}
+
+func (s *webSessionStore) ensure(id string) *webSession {
+	if id == "" {
+		return s.create()
+	}
+	if sess, ok := s.get(id); ok {
+		return sess
+	}
+	return s.create()
+}
+
+var webStore = newWebSessionStore()
 
 func accent(s string) string  { return color.Format(color.PURPLE, s) }
 func info(s string) string    { return color.Format(color.BLUE, s) }
@@ -50,6 +101,42 @@ type ToolResponse struct {
 	Command string `json:"command,omitempty"` // when action == run_command
 	Text    string `json:"text,omitempty"`    // when action == answer
 }
+
+type webChatRequest struct {
+	SessionID string `json:"sessionId"`
+	Message   string `json:"message"`
+}
+
+type webChatResponse struct {
+	SessionID     string        `json:"sessionId"`
+	Action        string        `json:"action"`
+	AssistantText string        `json:"assistantText,omitempty"`
+	Command       string        `json:"command,omitempty"`
+	CommandOutput string        `json:"commandOutput,omitempty"`
+	Raw           string        `json:"raw,omitempty"`
+	Messages      []ChatMessage `json:"messages"`
+	Model         string        `json:"model"`
+	Timestamp     time.Time     `json:"timestamp"`
+	Stats         Stats         `json:"stats"`
+}
+
+type webCommandRequest struct {
+	Command string `json:"command"`
+}
+
+type webCommandResponse struct {
+	Command   string    `json:"command"`
+	Output    string    `json:"output"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+const webHelpText = `Web UI commands:
+/auto-on   Enable automatic analysis after commands
+/auto-off  Disable automatic analysis after commands
+/save      Save current web session to /tmp as JSON
+/last      Show last prompt and assistant reply
+/stats     Show live session stats (also visible in UI)
+/allowedcomm Show the allowlisted shell commands`
 
 type Session struct {
 	Timestamp    string        `json:"timestamp"`
@@ -114,6 +201,14 @@ func callOllama(messages []ChatMessage) (string, error) {
 		return "", err
 	}
 	return cr.Message.Content, nil
+}
+
+func callOllamaWithLog(origin string, messages []ChatMessage) (string, error) {
+	start := time.Now()
+	resp, err := callOllama(messages)
+	dur := time.Since(start)
+	log.Printf("[ollama][%s] messages=%d model=%s dur=%s err=%v", origin, len(messages), modelName, dur.Round(time.Millisecond), err)
+	return resp, err
 }
 
 func runCommand(cmdStr string) string {
@@ -379,6 +474,326 @@ func splitRedirection(fields []string) (args []string, redirectFile string, appe
 	return fields, "", false, nil
 }
 
+func startWebUI(bindAddr string) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/chat", handleWebChat)
+	mux.HandleFunc("/api/prompt", handleWebPrompt)
+	mux.HandleFunc("/api/help", handleWebHelp)
+	mux.HandleFunc("/api/command", handleWebCommand)
+	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+
+	fileServer := http.FileServer(http.FS(webStatic))
+	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
+	mux.HandleFunc("/", serveWebIndex)
+
+	log.Printf("web UI listening on %s (model=%s, prompt=%s, chars=%d)\n", bindAddr, modelName, systemPromptName, len(systemPrompt))
+	return http.ListenAndServe(bindAddr, mux)
+}
+
+func serveWebIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := webStatic.ReadFile("webui_static/index.html")
+	if err != nil {
+		http.Error(w, "index missing", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(data)
+}
+
+func handleWebPrompt(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"prompt": systemPrompt, "name": systemPromptName, "model": modelName})
+}
+
+func handleWebHelp(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"help": webHelpText})
+}
+
+func handleWebCommand(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req webCommandRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.Command = strings.TrimSpace(req.Command)
+	if req.Command == "" {
+		http.Error(w, "command required", http.StatusBadRequest)
+		return
+	}
+
+	output := runCommand(req.Command)
+	writeJSON(w, http.StatusOK, webCommandResponse{
+		Command:   req.Command,
+		Output:    output,
+		Timestamp: time.Now().UTC(),
+	})
+}
+
+func handleWebChat(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req webChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	req.Message = strings.TrimSpace(req.Message)
+	if req.Message == "" {
+		http.Error(w, "message required", http.StatusBadRequest)
+		return
+	}
+
+	sess := webStore.ensure(req.SessionID)
+
+	lower := strings.ToLower(strings.TrimSpace(req.Message))
+	switch lower {
+	case "/auto-on":
+		autoAnalyze = true
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: "Auto-analysis enabled (after commands).",
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+		return
+	case "/auto-off":
+		autoAnalyze = false
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: "Auto-analysis disabled.",
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+		return
+	case "/last":
+		if len(sess.Messages) == 0 {
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "answer",
+				AssistantText: "No prompt/answer captured yet.",
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+		lastUser := -1
+		for i := len(sess.Messages) - 1; i >= 0; i-- {
+			if sess.Messages[i].Role == "user" {
+				lastUser = i
+				break
+			}
+		}
+		if lastUser == -1 {
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "answer",
+				AssistantText: "No prompt/answer captured yet.",
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+		nextAssistant := -1
+		for i := lastUser + 1; i < len(sess.Messages); i++ {
+			if sess.Messages[i].Role == "assistant" {
+				nextAssistant = i
+				break
+			}
+		}
+		msg := "(No assistant reply yet after that prompt.)"
+		if nextAssistant != -1 {
+			msg = sess.Messages[nextAssistant].Content
+		}
+		resp := fmt.Sprintf("Last prompt:\n%s\n\nAnswer:\n%s", sess.Messages[lastUser].Content, msg)
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: resp,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+		return
+	case "/save":
+		path, err := saveWebSession(sess)
+		text := "Session saved."
+		if err != nil {
+			text = fmt.Sprintf("Save failed: %v", err)
+		} else if path != "" {
+			text = fmt.Sprintf("Session saved to %s", path)
+		}
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: text,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+		return
+	case "/stats", "/s":
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: formatStatsPlain(sess.Stats),
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+		return
+	case "/allowedcomm":
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: "Allowed commands:\n" + strings.Join(allowedCommandsList(), ", "),
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+		return
+	}
+	sess.Stats.recordUser(req.Message)
+	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: req.Message})
+
+	messages := make([]ChatMessage, 0, len(sess.Messages)+1)
+	messages = append(messages, ChatMessage{Role: "system", Content: systemPrompt})
+	messages = append(messages, sess.Messages...)
+
+	raw, err := callOllamaWithLog("web-chat:"+sess.ID, messages)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("ollama error: %v", err), http.StatusBadGateway)
+		return
+	}
+
+	clean := strings.TrimSpace(raw)
+	if strings.HasPrefix(clean, "```") {
+		if i := strings.Index(clean, "\n"); i != -1 {
+			clean = clean[i+1:]
+		}
+		clean = strings.TrimSuffix(clean, "```")
+		clean = strings.TrimSpace(clean)
+	}
+
+	var tool ToolResponse
+	if err := json.Unmarshal([]byte(clean), &tool); err != nil {
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: raw,
+			Raw:           raw,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+		return
+	}
+
+	switch tool.Action {
+	case "run_command":
+		sess.Stats.recordCommand(tool.Command)
+		out := runCommand(tool.Command)
+		content := "Command output:\n" + out
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
+
+		combined := content
+		if autoAnalyze {
+			analysisPrompt := "Analyze the command output above and summarize key points. Do not request or run additional commands."
+			analysisMessages := append(messages, ChatMessage{Role: "assistant", Content: content})
+			analysisMessages = append(analysisMessages, ChatMessage{Role: "user", Content: analysisPrompt})
+			analysisRaw, err := callOllamaWithLog("web-chat-analysis:"+sess.ID, analysisMessages)
+			if err == nil {
+				analysisClean := strings.TrimSpace(analysisRaw)
+				if strings.HasPrefix(analysisClean, "```") {
+					if i := strings.Index(analysisClean, "\n"); i != -1 {
+						analysisClean = analysisClean[i+1:]
+					}
+					analysisClean = strings.TrimSuffix(analysisClean, "```")
+					analysisClean = strings.TrimSpace(analysisClean)
+				}
+
+				var analysis ToolResponse
+				if err := json.Unmarshal([]byte(analysisClean), &analysis); err == nil && analysis.Action == "answer" {
+					analysisText := analysis.Text
+					sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: analysisText})
+					sess.Stats.recordAssistant(analysisText)
+					combined = combined + "\n\nAnalysis:\n" + analysisText
+				} else {
+					sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: analysisRaw})
+					combined = combined + "\n\nAnalysis (raw):\n" + analysisRaw
+				}
+			}
+		}
+
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "run_command",
+			AssistantText: combined,
+			Command:       tool.Command,
+			CommandOutput: out,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+	case "answer":
+		sess.Stats.recordAssistant(tool.Text)
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: tool.Text})
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: tool.Text,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+	default:
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "unknown",
+			AssistantText: raw,
+			Raw:           raw,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+		})
+	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, payload any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
 func printStats(s *Stats) {
 	fmt.Println(accent("Session stats:"))
 	fmt.Printf("  User messages:      %s\n", success(fmt.Sprintf("%d", s.UserMessages)))
@@ -389,6 +804,22 @@ func printStats(s *Stats) {
 	if s.LastCommand != "" {
 		fmt.Printf("  Last command:       %s\n", info(s.LastCommand))
 	}
+}
+
+func formatStatsPlain(s Stats) string {
+	var b strings.Builder
+	b.WriteString("Session stats:\n")
+	fmt.Fprintf(&b, "- User messages: %d\n", s.UserMessages)
+	fmt.Fprintf(&b, "- Assistant messages: %d\n", s.AssistantMessages)
+	fmt.Fprintf(&b, "- Commands run: %d\n", s.CommandsRun)
+	fmt.Fprintf(&b, "- User chars total: %d\n", s.TotalUserChars)
+	fmt.Fprintf(&b, "- Assistant chars: %d\n", s.TotalAssistantChars)
+	if s.LastCommand != "" {
+		fmt.Fprintf(&b, "- Last command: %s\n", s.LastCommand)
+	} else {
+		b.WriteString("- Last command: (none)\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func printLastQA() {
@@ -475,6 +906,26 @@ func saveSessionToFile(session Session) error {
 	return nil
 }
 
+func saveWebSession(sess *webSession) (string, error) {
+	timestamp := time.Now().UTC().Format("20060102_1504")
+	filename := filepath.Join("/tmp", fmt.Sprintf("owrap_web_%s.json", timestamp))
+	payload := Session{
+		Timestamp:    time.Now().UTC().Format(time.RFC3339),
+		Model:        modelName,
+		Messages:     sess.Messages,
+		Stats:        sess.Stats,
+		CachedBlocks: nil,
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal session: %w", err)
+	}
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return "", fmt.Errorf("failed to write session to %s: %w", filename, err)
+	}
+	return filename, nil
+}
+
 // readUserInput captures a full user paste/entry, including multiple lines already
 // present in the input buffer, so multi-line paste is treated as one message.
 func readUserInput(r *bufio.Reader) (string, error) {
@@ -518,6 +969,19 @@ func readUserInputWithDelim(r *bufio.Reader, delim string) (string, error) {
 }
 
 func main() {
+	webUI := flag.Bool("web", false, "serve the web UI instead of the CLI")
+	flag.Parse()
+
+	if *webUI {
+		bind := webBindDefault
+		fmt.Printf("Starting web UI on %s (model=%s, prompt=%s, chars=%d)\n", bind, modelName, systemPromptName, len(systemPrompt))
+		if err := startWebUI(bind); err != nil {
+			fmt.Println(warn("Web UI error:"), err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	ShowBanner()
 
 	reader := bufio.NewReader(os.Stdin)

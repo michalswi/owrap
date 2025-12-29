@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>owrapUI</title>
+  <style>
+    :root {
+      --bg: #06080f;
+      --panel: #0d111a;
+      --panel-2: #111827;
+      --border: #1f2937;
+      --text: #e6edf3;
+      --muted: #9ca3af;
+      --accent: #7c3aed;
+      --accent-2: #22d3ee;
+      --success: #22c55e;
+    }
+    * { box-sizing: border-box; }
+    body { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; margin: 0; padding: 0; background: radial-gradient(circle at 20% 20%, rgba(124,58,237,0.08), transparent 40%), radial-gradient(circle at 80% 0%, rgba(34,211,238,0.09), transparent 35%), var(--bg); color: var(--text); }
+    header { padding: 14px 18px; background: linear-gradient(90deg, rgba(124,58,237,0.18), rgba(34,211,238,0.1)); display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(6px); }
+    main { padding: 20px; max-width: 1100px; margin: 0 auto; }
+    #log { background: linear-gradient(180deg, rgba(17,24,39,0.9), rgba(13,17,26,0.95)); border: 1px solid var(--border); border-radius: 14px; padding: 14px; min-height: 360px; white-space: pre-wrap; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+    textarea, input[type="text"] { width: 100%; padding: 12px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
+    textarea { min-height: 120px; }
+    button { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; border: none; border-radius: 10px; padding: 11px 16px; cursor: pointer; font-weight: 700; letter-spacing: 0.2px; box-shadow: 0 10px 30px rgba(124,58,237,0.35); transition: transform 120ms ease, box-shadow 120ms ease; }
+    button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
+    button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 32px rgba(34,211,238,0.35); }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .stack { display: flex; gap: 12px; flex-wrap: wrap; }
+    .pill { padding: 6px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
+    h2 { margin: 0 0 12px; letter-spacing: 0.3px; }
+    h3 { margin: 18px 0 8px; color: var(--accent-2); letter-spacing: 0.2px; }
+    label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
+    .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.25); }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+    .stat-card { position: relative; padding: 16px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.04); background: linear-gradient(135deg, rgba(124,58,237,0.16), rgba(34,211,238,0.14)), radial-gradient(circle at 12% 20%, rgba(124,58,237,0.15), transparent 45%), radial-gradient(circle at 80% 10%, rgba(34,211,238,0.16), transparent 40%), var(--panel-2); box-shadow: 0 18px 36px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04); overflow: hidden; backdrop-filter: blur(6px); }
+    .stat-card::before { content: ""; position: absolute; inset: 0; border-radius: 14px; background: linear-gradient(90deg, rgba(255,255,255,0.05), transparent); opacity: 0.8; pointer-events: none; }
+    .stat-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; position: relative; z-index: 1; }
+    .stat-label { font-size: 13px; color: var(--muted); letter-spacing: 0.2px; text-transform: uppercase; }
+    .stat-tag { font-size: 11px; color: #a5f3fc; background: rgba(34,211,238,0.12); padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(34,211,238,0.35); }
+    .stat-value { position: relative; z-index: 1; font-size: 34px; font-weight: 800; line-height: 1.1; color: #f8fafc; margin: 6px 0 2px; }
+    .stat-sub { position: relative; z-index: 1; font-size: 13px; color: var(--muted); opacity: 0.9; }
+    .stat-span-2 { grid-column: span 2; }
+    .truncate { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .log-line { margin: 4px 0; font-size: 14px; line-height: 1.5; }
+    .log-user { color: #fbbf24; font-weight: 700; }
+    .log-assistant { color: #22c55e; font-weight: 700; }
+    .log-command { color: #22d3ee; }
+    .log-error { color: #ef4444; }
+    .log-plain { color: var(--text); }
+    .label-user { color: #fbbf24; font-weight: 700; }
+    .label-assistant { color: #22c55e; font-weight: 700; }
+    .log-sep { border-bottom: 2px dashed #22d3ee; opacity: 0.85; margin: 10px 0 12px; }
+    #footer { text-align: center; color: var(--muted); font-size: 12px; margin: 24px 0 12px; letter-spacing: 0.3px; }
+    @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { .stat-span-2 { grid-column: span 1; } }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="pill" id="model">model: ...</div>
+    <div class="pill" id="prompt">sys-prompt: loaded</div>
+  </header>
+  <main>
+    <h2>owrapUI</h2>
+
+    <div class="panel" style="margin-bottom:16px;">
+      <div class="stack">
+        <span class="pill" id="session">session: new</span>
+        <button id="showPrompt" type="button">Show sys-prompt</button>
+        <button id="showHelp" type="button">/help</button>
+      </div>
+    </div>
+
+    <div id="log"></div>
+
+    <div class="panel" style="margin-top:16px;">
+      <label>Console input (⌘/Ctrl+Enter to send)</label>
+      <textarea id="msg" placeholder="Type a message or command for the assistant."></textarea>
+      <div class="row" style="margin-top:8px; justify-content: space-between;">
+        <button id="send">Send</button>
+        <span style="font-size:12px; color:var(--muted);">Assistant may choose to run allowed commands.</span>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:18px;">
+      <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <h3 style="margin:0; color: var(--text);">Live session stats</h3>
+        <span class="pill" style="background: rgba(34,211,238,0.12); color: #a5f3fc;">auto-updates</span>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-top">
+            <div class="stat-label">User messages</div>
+            <span class="stat-tag">you</span>
+          </div>
+          <div class="stat-value" id="statUserMessages">0</div>
+          <div class="stat-sub">chars <span id="statUserChars">0</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-top">
+            <div class="stat-label">Assistant messages</div>
+            <span class="stat-tag">assistant</span>
+          </div>
+          <div class="stat-value" id="statAssistantMessages">0</div>
+          <div class="stat-sub">chars <span id="statAssistantChars">0</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-top">
+            <div class="stat-label">Commands run</div>
+            <span class="stat-tag">commands</span>
+          </div>
+          <div class="stat-value" id="statCommands">0</div>
+          <div class="stat-sub">Recent command appears in the log.</div>
+        </div>
+      </div>
+    </div>
+  </main>
+  <div id="footer">© 2049 michalswi</div>
+  <script>
+    const logEl = document.getElementById('log');
+    const msgEl = document.getElementById('msg');
+    const sendBtn = document.getElementById('send');
+    const promptBtn = document.getElementById('showPrompt');
+    const helpBtn = document.getElementById('showHelp');
+    const modelEl = document.getElementById('model');
+    const promptEl = document.getElementById('prompt');
+    const sessionEl = document.getElementById('session');
+    const statsEls = {
+      userMsgs: document.getElementById('statUserMessages'),
+      assistantMsgs: document.getElementById('statAssistantMessages'),
+      commands: document.getElementById('statCommands'),
+      userChars: document.getElementById('statUserChars'),
+      assistantChars: document.getElementById('statAssistantChars')
+    };
+    const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
+    let sessionId = '';
+
+    async function fetchPrompt() {
+      const res = await fetch('/api/prompt');
+      const data = await res.json();
+      const promptName = data.name || (data.prompt ? 'custom' : 'default');
+      promptBtn.onclick = () => alert(`${promptName ? promptName + '\n\n' : ''}${data.prompt || ''}`);
+      promptEl.textContent = `sys-prompt: ${promptName}`;
+      if (data.model) {
+        modelEl.textContent = `model: ${data.model}`;
+      }
+    }
+
+    async function fetchHelp() {
+      const res = await fetch('/api/help');
+      const data = await res.json();
+      alert(data.help || '');
+    }
+
+    function renderStats(stats = {}) {
+      const s = { ...emptyStats, ...stats };
+      statsEls.userMsgs.textContent = s.UserMessages;
+      statsEls.assistantMsgs.textContent = s.AssistantMessages;
+      statsEls.commands.textContent = s.CommandsRun;
+      statsEls.userChars.textContent = s.TotalUserChars;
+      statsEls.assistantChars.textContent = s.TotalAssistantChars;
+    }
+
+    async function send() {
+      const text = msgEl.value.trim();
+      if (!text) return;
+      sendBtn.disabled = true;
+      appendSeparator();
+      appendLine(`You: ${text}`, 'user');
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, message: text })
+        });
+        if (!res.ok) {
+          appendLine(`Error: ${res.status}`, 'error');
+        } else {
+          const data = await res.json();
+          sessionId = data.sessionId;
+          sessionEl.textContent = `session: ${sessionId}`;
+          if (data.action === 'run_command') {
+            appendLine(`Assistant [Running]: ${data.command}`, 'assistant');
+            appendLine('[Command output]:', 'assistant');
+            appendLine(data.commandOutput || '(no output)', 'command');
+            if (data.assistantText) {
+              const marker = '\n\nAnalysis:\n';
+              const idx = data.assistantText.indexOf(marker);
+              if (idx !== -1) {
+                const analysis = data.assistantText.slice(idx + marker.length).trim();
+                if (analysis) {
+                  appendLine('Analysis:', 'assistant');
+                  appendLine(analysis, 'assistant');
+                }
+              }
+            }
+          }
+          if (data.assistantText && data.action !== 'run_command') {
+            appendLine(`Assistant: ${data.assistantText}`, 'assistant');
+          }
+          modelEl.textContent = `model: ${data.model}`;
+          if (data.stats) {
+            renderStats(data.stats);
+          }
+        }
+      } catch (e) {
+        appendLine('Network error: ' + e, 'error');
+      } finally {
+        sendBtn.disabled = false;
+        msgEl.value = '';
+        msgEl.focus();
+      }
+    }
+
+    function appendLine(text, kind = 'plain') {
+      let prefix = '';
+      let body = text;
+      if (kind === 'user' || kind === 'assistant') {
+        const idx = text.indexOf(':');
+        if (idx !== -1) {
+          prefix = text.slice(0, idx + 1);
+          body = text.slice(idx + 1);
+        }
+      }
+
+      const cls = {
+        user: 'log-plain',
+        assistant: 'log-plain',
+        command: 'log-command',
+        error: 'log-error',
+        plain: 'log-plain'
+      }[kind] || 'log-plain';
+
+      const labelCls = kind === 'user' ? 'label-user' : kind === 'assistant' ? 'label-assistant' : '';
+      const safePrefix = escapeHtml(prefix);
+      const labelHtml = labelCls ? `<span class="${labelCls}">${safePrefix}</span>` : safePrefix;
+      const renderedBody = ansiToHtml(body);
+      logEl.insertAdjacentHTML('beforeend', `<div class="log-line ${cls}">${labelHtml}${renderedBody}</div>`);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function appendSeparator() {
+      logEl.insertAdjacentHTML('beforeend', '<div class="log-sep"></div>');
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function ansiToHtml(text) {
+      // Escape HTML first; ANSI codes will be converted back to spans.
+      const parts = text.split(/(\x1b\[[0-9;]*m)/g);
+      let currentStyle = '';
+      let html = '';
+
+      function styleToSpan(style) {
+        return style ? `<span style="${style}">` : '';
+      }
+
+      function decodeAnsi(seq) {
+        if (!seq) return null;
+        const m = seq.match(/\x1b\[([0-9;]*)m/);
+        if (!m) return null;
+        const codes = m[1].split(';').filter(Boolean).map(Number);
+        let color = null;
+        let weight = null;
+        for (let i = 0; i < codes.length; i++) {
+          const c = codes[i];
+          if (c === 0) { // reset
+            color = null; weight = null;
+          } else if (c === 1) {
+            weight = 'bold';
+          } else if (c >= 30 && c <= 37) {
+            color = ansiBaseColor(c - 30, false);
+          } else if (c >= 90 && c <= 97) {
+            color = ansiBaseColor(c - 90, true);
+          } else if (c === 38 && codes[i + 1] === 5 && typeof codes[i + 2] === 'number') {
+            const n = codes[i + 2];
+            color = xterm256ToHex(n);
+            i += 2;
+          }
+        }
+        const styleParts = [];
+        if (color) styleParts.push(`color:${color}`);
+        if (weight) styleParts.push('font-weight:700');
+        return styleParts.join(';');
+      }
+
+      for (const part of parts) {
+        if (part.startsWith('\x1b[') && part.endsWith('m')) {
+          const nextStyle = decodeAnsi(part);
+          if (currentStyle) html += '</span>';
+          currentStyle = nextStyle || '';
+          if (currentStyle) html += styleToSpan(currentStyle);
+        } else if (part) {
+          html += escapeHtml(part).replace(/\n/g, '<br>');
+        }
+      }
+      if (currentStyle) html += '</span>';
+      return html;
+    }
+
+    function ansiBaseColor(idx, bright) {
+      const base = [
+        '#1c1c1c', '#af0000', '#00af00', '#af8700', '#005faf', '#875faf', '#00afaf', '#e4e4e4'
+      ];
+      const brightBase = [
+        '#4e4e4e', '#ff5f5f', '#5fff5f', '#ffd75f', '#5f87ff', '#ff87ff', '#5fffff', '#ffffff'
+      ];
+      return (bright ? brightBase : base)[idx] || '#e4e4e4';
+    }
+
+    function xterm256ToHex(n) {
+      if (n < 0 || n > 255 || Number.isNaN(n)) return '#e4e4e4';
+      const base16 = [
+        '#000000', '#800000', '#008000', '#808000', '#000080', '#800080', '#008080', '#c0c0c0',
+        '#808080', '#ff0000', '#00ff00', '#ffff00', '#0000ff', '#ff00ff', '#00ffff', '#ffffff'
+      ];
+      if (n < 16) return base16[n];
+      if (n >= 16 && n <= 231) {
+        const c = n - 16;
+        const r = Math.floor(c / 36);
+        const g = Math.floor((c % 36) / 6);
+        const b = c % 6;
+        const conv = v => v === 0 ? 0 : v * 40 + 55;
+        return rgbToHex(conv(r), conv(g), conv(b));
+      }
+      // Grayscale 232-255
+      const level = 8 + (n - 232) * 10;
+      return rgbToHex(level, level, level);
+    }
+
+    function rgbToHex(r, g, b) {
+      const toHex = v => v.toString(16).padStart(2, '0');
+      return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    sendBtn.addEventListener('click', send);
+    helpBtn.addEventListener('click', fetchHelp);
+    msgEl.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+        e.preventDefault();
+        send();
+      } else if (e.key === 'Enter' && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        send();
+      }
+    });
+
+    fetchPrompt();
+    renderStats(emptyStats);
+    msgEl.focus();
+  </script>
+</body>
+</html>

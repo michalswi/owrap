@@ -28,8 +28,6 @@ it’s a local Go CLI that:
 <details>
 <summary><h2># Help</h2></summary>
 
-run app
-
 ```
 $ ./owrap
 
@@ -39,7 +37,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.2.0 - @michalswi
+	v0.3.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -64,6 +62,12 @@ Available commands:
 Model-run allowed commands:
   [arp, cat, chmod, curl, dig, echo, ffuf, find, for, grep, head, httpx, ls, nc, netcat, nmap, nslookup, ping, pwd, sort, subfinder, tail, telnet, traceroute, uniq, wc, wget, while, whois]
 ------------------------------------------------------------
+
+> [webui version] described below 
+$ ./owrap -h
+Usage of ./owrap:
+  -web
+    	serve the web UI instead of the CLI
 ```
 
 </details>
@@ -87,7 +91,62 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 
 - default **URL** to connect to Ollama is `http://localhost:11434/api/chat`. It might be changed using env var `OLLAMA_URL`  
 - default **local LLM model** is `gemma3:4b`. It might be changed using env var `OLLAMA_MODEL`
-- default **system prompt** is defined [here](./vars.go). By default the built-in prompt is used; set env var `SYSTEM_PROMPT` to a prompt file path (e.g., [prompts/recon.txt](./prompts/recon.txt)) to load it instead (falls back to default if the file cannot be read).
+- default **system prompt** is defined [here](./vars.go). By default the built-in prompt is used; set env var `SYSTEM_PROMPT` to a prompt file path (e.g., [prompts/recon.txt](./prompts/recon.txt)) to load it instead (falls back to default if the file cannot be read)
+- default **port** for webUI is `8080`. It might be changed using env var `WEB_BIND`
+
+### > run app [terminal version]
+
+```
+$ ./owrap
+
+ ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
+██╔═══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗
+██║   ██║██║ █╗ ██║██████╔╝███████║██████╔╝
+██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
+╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
+ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
+	v0.3.0 - @michalswi
+
+Type '/q' to quit.
+Type '/h' for help/shortcuts.
+------------------------------------------------------------
+You: hi
+Assistant: Hi there! How can I help you today?
+------------------------------------------------------------
+```
+
+```
+$ SYSTEM_PROMPT=./prompts/(...).txt ./owrap
+
+ ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
+██╔═══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗
+██║   ██║██║ █╗ ██║██████╔╝███████║██████╔╝
+██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
+╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
+ ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
+	v0.3.0 - @michalswi
+
+Type '/q' to quit.
+Type '/h' for help/shortcuts.
+------------------------------------------------------------
+You:
+```
+
+### > run app [webui version]
+```
+$ ./owrap -web
+2025/12/28 16:19:44 web UI listening on :8080 (model=gemma3:4b, prompt=default, chars=481)
+
+OR
+
+$ SYSTEM_PROMPT=./prompts/(...).txt ./owrap -web
+(...)
+
+
+$ open in web browser http://localhost:8080/
+```
+
+![owrapui](./img/owrapui.png)
 
 
 ### > examples
@@ -103,7 +162,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.2.0 - @michalswi
+	v0.3.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.

@@ -10,7 +10,7 @@ const (
 	separator = "------------------------------------------------------------"
 )
 
-var version = "v0.2.0"
+var version = "v0.3.0"
 
 var defaultSystemPrompt = `
 You are a helpful, general-purpose assistant.
@@ -28,7 +28,8 @@ Never include backticks, comments, or extra keys.
 
 var ollamaURL = utils.GetEnv("OLLAMA_URL", "http://localhost:11434/api/chat")
 var modelName = utils.GetEnv("OLLAMA_MODEL", "gemma3:4b")
-var systemPrompt = utils.LoadSystemPrompt(defaultSystemPrompt)
+var systemPrompt, systemPromptName = utils.LoadSystemPromptWithName(defaultSystemPrompt)
+var webBindDefault = utils.GetEnv("WEB_BIND", ":8080")
 
 var sessionMessages []ChatMessage
 var cachedBlocks []string
