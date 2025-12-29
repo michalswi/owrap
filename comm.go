@@ -30,4 +30,6 @@ var allowedCommands = map[string]bool{
 	"netcat":     true,
 	"telnet":     true,
 	"nc":         true,
+	"date":       true,
+	"tree":       true,
 }
