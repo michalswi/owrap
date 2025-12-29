@@ -131,12 +131,13 @@ type webCommandResponse struct {
 }
 
 const webHelpText = `Web UI commands:
-/auto-on   Enable automatic analysis after commands
-/auto-off  Disable automatic analysis after commands
-/save      Save current web session to /tmp as JSON
-/last      Show last prompt and assistant reply
-/stats     Show live session stats (also visible in UI)
-/allowedcomm Show the allowlisted shell commands`
+/auto-on     Enable automatic analysis after commands
+/auto-off    Disable automatic analysis after commands
+/save        Save current web session to /tmp as JSON
+/last        Show last prompt and assistant reply
+/stats       Show live session stats (also visible in UI)
+/allowedcomm Show the allowlisted shell commands
+`
 
 type Session struct {
 	Timestamp    string        `json:"timestamp"`
@@ -506,7 +507,12 @@ func serveWebIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleWebPrompt(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{"prompt": systemPrompt, "name": systemPromptName, "model": modelName})
+	writeJSON(w, http.StatusOK, map[string]string{
+		"prompt":  systemPrompt,
+		"name":    systemPromptName,
+		"model":   modelName,
+		"version": version,
+	})
 }
 
 func handleWebHelp(w http.ResponseWriter, _ *http.Request) {

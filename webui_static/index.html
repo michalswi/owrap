@@ -18,7 +18,18 @@
     }
     * { box-sizing: border-box; }
     body { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; margin: 0; padding: 0; background: radial-gradient(circle at 20% 20%, rgba(124,58,237,0.08), transparent 40%), radial-gradient(circle at 80% 0%, rgba(34,211,238,0.09), transparent 35%), var(--bg); color: var(--text); }
-    header { padding: 14px 18px; background: linear-gradient(90deg, rgba(124,58,237,0.18), rgba(34,211,238,0.1)); display: flex; gap: 10px; align-items: center; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(6px); }
+    header { padding: 14px 18px; background: linear-gradient(90deg, rgba(124,58,237,0.18), rgba(34,211,238,0.1)); display: flex; gap: 10px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(6px); }
+    .header-left { display: flex; gap: 10px; align-items: center; }
+    #modalOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; backdrop-filter: blur(4px); z-index: 999; }
+    #modalOverlay.show { display: flex; }
+    .modal-card { width: min(92vw, 720px); background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.02); padding: 16px 18px 18px; color: var(--text); }
+    .modal-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+    .modal-title { font-size: 18px; font-weight: 800; letter-spacing: 0.2px; }
+    .modal-close { background: transparent; border: 1px solid var(--border); color: var(--text); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-weight: 700; }
+    .modal-close:hover { background: rgba(255,255,255,0.05); }
+    .modal-subtitle { color: var(--muted); margin-bottom: 8px; font-size: 13px; }
+    .modal-body { font-size: 14px; line-height: 1.5; color: var(--text); }
+    .modal-pre { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; white-space: pre-wrap; overflow: auto; max-height: 55vh; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 13px; line-height: 1.45; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
     main { padding: 20px; max-width: 1100px; margin: 0 auto; }
     #log { background: linear-gradient(180deg, rgba(17,24,39,0.9), rgba(13,17,26,0.95)); border: 1px solid var(--border); border-radius: 14px; padding: 14px; min-height: 360px; white-space: pre-wrap; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
     textarea, input[type="text"] { width: 100%; padding: 12px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
@@ -60,8 +71,11 @@
 </head>
 <body>
   <header>
-    <div class="pill" id="model">model: ...</div>
-    <div class="pill" id="prompt">sys-prompt: loaded</div>
+    <div class="header-left">
+      <div class="pill" id="model">model: ...</div>
+      <div class="pill" id="prompt">sys-prompt: loaded</div>
+    </div>
+    <div class="pill" id="version">version: ...</div>
   </header>
   <main>
     <h2>owrapUI</h2>
@@ -119,6 +133,15 @@
     </div>
   </main>
   <div id="footer">© 2049 michalswi</div>
+  <div id="modalOverlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle"></div>
+        <button class="modal-close" id="modalClose" type="button">OK</button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+    </div>
+  </div>
   <script>
     const logEl = document.getElementById('log');
     const msgEl = document.getElementById('msg');
@@ -127,7 +150,12 @@
     const helpBtn = document.getElementById('showHelp');
     const modelEl = document.getElementById('model');
     const promptEl = document.getElementById('prompt');
+    const versionEl = document.getElementById('version');
     const sessionEl = document.getElementById('session');
+    const modalOverlay = document.getElementById('modalOverlay');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalBody = document.getElementById('modalBody');
+    const modalClose = document.getElementById('modalClose');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -138,21 +166,44 @@
     const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
     let sessionId = '';
 
+    function showModal(title, bodyHtml) {
+      modalTitle.textContent = title;
+      modalBody.innerHTML = bodyHtml;
+      modalOverlay.classList.add('show');
+    }
+
+    function closeModal() {
+      modalOverlay.classList.remove('show');
+    }
+
+    modalClose.addEventListener('click', closeModal);
+    modalOverlay.addEventListener('click', (e) => {
+      if (e.target === modalOverlay) closeModal();
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeModal();
+    });
+
     async function fetchPrompt() {
       const res = await fetch('/api/prompt');
       const data = await res.json();
       const promptName = data.name || (data.prompt ? 'custom' : 'default');
-      promptBtn.onclick = () => alert(`${promptName ? promptName + '\n\n' : ''}${data.prompt || ''}`);
+      const promptHtml = `<div class="modal-subtitle">${escapeHtml(promptName)}</div><pre class="modal-pre">${escapeHtml(data.prompt || '(empty)')}</pre>`;
+      promptBtn.onclick = () => showModal('System prompt', promptHtml);
       promptEl.textContent = `sys-prompt: ${promptName}`;
       if (data.model) {
         modelEl.textContent = `model: ${data.model}`;
+      }
+      if (data.version) {
+        versionEl.textContent = `version: ${data.version}`;
       }
     }
 
     async function fetchHelp() {
       const res = await fetch('/api/help');
       const data = await res.json();
-      alert(data.help || '');
+      const helpHtml = `<pre class="modal-pre">${escapeHtml(data.help || '(empty)')}</pre>`;
+      showModal('Web UI commands', helpHtml);
     }
 
     function renderStats(stats = {}) {
