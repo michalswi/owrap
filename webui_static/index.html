@@ -84,8 +84,11 @@
       <div class="stack">
         <span class="pill" id="session">session: new</span>
         <button id="showPrompt" type="button">Show sys-prompt</button>
-        <button id="showHelp" type="button">/help</button>
         <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
+        <button id="showHelp" type="button">/help</button>
+        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
+        <button id="autoOn" type="button">/auto-on</button>
+        <button id="autoOff" type="button">/auto-off</button>
       </div>
     </div>
 
@@ -150,6 +153,9 @@
     const promptBtn = document.getElementById('showPrompt');
     const helpBtn = document.getElementById('showHelp');
     const clearBtn = document.getElementById('clearChat');
+    const saveBtn = document.getElementById('saveSession');
+    const autoOnBtn = document.getElementById('autoOn');
+    const autoOffBtn = document.getElementById('autoOff');
     const modelEl = document.getElementById('model');
     const promptEl = document.getElementById('prompt');
     const versionEl = document.getElementById('version');
@@ -189,6 +195,9 @@
       if (e.key === 'Escape') closeModal();
     });
     clearBtn.addEventListener('click', clearChat);
+    saveBtn.addEventListener('click', () => sendText('/save'));
+    autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
+    autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
 
     function saveState() {
       if (restoringState) return;
@@ -277,6 +286,11 @@
     async function send() {
       const text = msgEl.value.trim();
       if (!text) return;
+      await sendText(text, true);
+    }
+
+    async function sendText(text, fromInput = false) {
+      if (!text) return;
       sendBtn.disabled = true;
       appendSeparator();
       appendLine(`You: ${text}`, 'user');
@@ -320,7 +334,7 @@
         appendLine('Network error: ' + e, 'error');
       } finally {
         sendBtn.disabled = false;
-        msgEl.value = '';
+        if (fromInput) msgEl.value = '';
         msgEl.focus();
         saveState();
       }
