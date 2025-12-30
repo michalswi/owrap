@@ -43,6 +43,9 @@
     .stack { display: flex; gap: 12px; flex-wrap: wrap; }
     .pill { padding: 6px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
     .header-icon { width: 30px; height: 30px; border-radius: 8px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
+    .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent-2); animation: spin 0.8s linear infinite; display: none; }
+    .spinner.visible { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
     h2 { margin: 0 0 12px; letter-spacing: 0.3px; }
     h3 { margin: 18px 0 8px; color: var(--accent-2); letter-spacing: 0.2px; }
     label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
@@ -104,7 +107,10 @@
       <label>Console input (⌘/Ctrl+Enter to send)</label>
       <textarea id="msg" placeholder="Type a message or command for the assistant."></textarea>
       <div class="row" style="margin-top:8px; justify-content: space-between;">
-        <button id="send">Send</button>
+        <div class="row" style="gap:8px;">
+          <button id="send">Send</button>
+          <div id="sendSpinner" class="spinner" aria-hidden="true"></div>
+        </div>
         <span style="font-size:12px; color:var(--muted);">Assistant may choose to run allowed commands.</span>
       </div>
     </div>
@@ -166,6 +172,7 @@
     const promptEl = document.getElementById('prompt');
     const versionEl = document.getElementById('version');
     const sessionEl = document.getElementById('session');
+    const sendSpinner = document.getElementById('sendSpinner');
     const modalOverlay = document.getElementById('modalOverlay');
     const modalTitle = document.getElementById('modalTitle');
     const modalBody = document.getElementById('modalBody');
@@ -297,7 +304,7 @@
 
     async function sendText(text, fromInput = false) {
       if (!text) return;
-      sendBtn.disabled = true;
+      setSending(true);
       appendSeparator();
       appendLine(`You: ${text}`, 'user');
       try {
@@ -339,11 +346,17 @@
       } catch (e) {
         appendLine('Network error: ' + e, 'error');
       } finally {
-        sendBtn.disabled = false;
+        setSending(false);
         if (fromInput) msgEl.value = '';
         msgEl.focus();
         saveState();
       }
+    }
+
+    function setSending(active) {
+      sendBtn.disabled = active;
+      sendSpinner.classList.toggle('visible', active);
+      sendSpinner.setAttribute('aria-hidden', (!active).toString());
     }
 
     function appendLine(text, kind = 'plain') {

@@ -1,8 +1,6 @@
 <div align="center">
 
-***OWRAP app***
-
-**local golang cli wrapper around ollama**
+<img src="./webstatic/img/webui.png" alt="logo" width="120">
 
 [![stars](https://img.shields.io/github/stars/michalswi/owrap?style=for-the-badge&color=353535)](https://github.com/michalswi/owrap)
 [![watchers](https://img.shields.io/github/watchers/michalswi/owrap?style=for-the-badge&color=353535)](https://github.com/michalswi/owrap)
@@ -16,17 +14,17 @@
 
 </div>
 
-it’s a local Go CLI that:
+**owrap** is local Go CLI (+ webUI) wrapper around Ollama that:
 
-- Sends your text to the Ollama HTTP chat endpoint with the configured model.
-- When asked, runs [allowlisted](./comm.go#L3) shell commands locally, captures stdout/stderr, and feeds that output back as a chat message so the model can continue.
-- Maintains a session log (user/assistant messages, stats, cached pastes) in memory; you can save it to tmp with /save.
-- Provides slash commands for help, stats, cached blocks, exec file, etc.
-- All interaction stays on your machine.
+- sends your text to the Ollama HTTP chat endpoint with the configured model
+- when asked, runs [allowlisted](./comm.go#L3) shell commands locally, captures stdout/stderr, and feeds that output back as a chat message so the model can continue
+- maintains a session log (user/assistant messages, stats) in memory; you can save it to tmp with /save
+- provides slash commands for help, stats, cached blocks, exec file, etc.
+- app works either in terminal or in webui
+- all interaction stays on your machine
 
 
-<details>
-<summary><h2># Help</h2></summary>
+## Help
 
 ```
 $ ./owrap
@@ -70,11 +68,7 @@ Usage of ./owrap:
     	serve the web UI instead of the CLI
 ```
 
-</details>
-
-
-<details>
-<summary><h2># Quickstart</h2></summary>
+## Quickstart
 
 ### > prereq
 
@@ -257,9 +251,6 @@ Analysis:
 (...)
 ------------------------------------------------------------
 ```
-
-</details>
-
 
 ## \# Disclaimer
 
