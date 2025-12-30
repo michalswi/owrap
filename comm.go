@@ -32,4 +32,6 @@ var allowedCommands = map[string]bool{
 	"nc":         true,
 	"date":       true,
 	"tree":       true,
+	"terraform":  true,
+	"ansible":    true,
 }
