@@ -85,6 +85,7 @@
         <span class="pill" id="session">session: new</span>
         <button id="showPrompt" type="button">Show sys-prompt</button>
         <button id="showHelp" type="button">/help</button>
+        <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
       </div>
     </div>
 
@@ -148,6 +149,7 @@
     const sendBtn = document.getElementById('send');
     const promptBtn = document.getElementById('showPrompt');
     const helpBtn = document.getElementById('showHelp');
+    const clearBtn = document.getElementById('clearChat');
     const modelEl = document.getElementById('model');
     const promptEl = document.getElementById('prompt');
     const versionEl = document.getElementById('version');
@@ -164,7 +166,10 @@
       assistantChars: document.getElementById('statAssistantChars')
     };
     const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
+    const STORAGE_KEY = 'owrap_ui_state_v1';
     let sessionId = '';
+    let currentStats = { ...emptyStats };
+    let restoringState = false;
 
     function showModal(title, bodyHtml) {
       modalTitle.textContent = title;
@@ -183,6 +188,57 @@
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') closeModal();
     });
+    clearBtn.addEventListener('click', clearChat);
+
+    function saveState() {
+      if (restoringState) return;
+      const payload = {
+        sessionId,
+        log: logEl.innerHTML,
+        stats: currentStats,
+        model: modelEl.textContent,
+        prompt: promptEl.textContent,
+        version: versionEl.textContent,
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      } catch (_) {
+        // ignore storage errors
+      }
+    }
+
+    function loadState() {
+      let parsed = null;
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) parsed = JSON.parse(raw);
+      } catch (_) {
+        parsed = null;
+      }
+      if (!parsed) return false;
+      restoringState = true;
+      if (parsed.log) logEl.innerHTML = parsed.log;
+      if (parsed.sessionId) {
+        sessionId = parsed.sessionId;
+        sessionEl.textContent = `session: ${sessionId}`;
+      }
+      if (parsed.stats) {
+        renderStats(parsed.stats, true);
+      }
+      if (parsed.model) modelEl.textContent = parsed.model;
+      if (parsed.prompt) promptEl.textContent = parsed.prompt;
+      if (parsed.version) versionEl.textContent = parsed.version;
+      restoringState = false;
+      return true;
+    }
+
+    function clearChat() {
+      logEl.innerHTML = '';
+      sessionId = '';
+      sessionEl.textContent = 'session: new';
+      renderStats(emptyStats, true);
+      saveState();
+    }
 
     async function fetchPrompt() {
       const res = await fetch('/api/prompt');
@@ -197,6 +253,7 @@
       if (data.version) {
         versionEl.textContent = `version: ${data.version}`;
       }
+      saveState();
     }
 
     async function fetchHelp() {
@@ -206,13 +263,15 @@
       showModal('Web UI commands', helpHtml);
     }
 
-    function renderStats(stats = {}) {
+    function renderStats(stats = {}, skipSave = false) {
       const s = { ...emptyStats, ...stats };
+      currentStats = s;
       statsEls.userMsgs.textContent = s.UserMessages;
       statsEls.assistantMsgs.textContent = s.AssistantMessages;
       statsEls.commands.textContent = s.CommandsRun;
       statsEls.userChars.textContent = s.TotalUserChars;
       statsEls.assistantChars.textContent = s.TotalAssistantChars;
+      if (!skipSave) saveState();
     }
 
     async function send() {
@@ -263,6 +322,7 @@
         sendBtn.disabled = false;
         msgEl.value = '';
         msgEl.focus();
+        saveState();
       }
     }
 
@@ -407,8 +467,11 @@
       }
     });
 
+    const restored = loadState();
     fetchPrompt();
-    renderStats(emptyStats);
+    if (!restored) {
+      renderStats(emptyStats, true);
+    }
     msgEl.focus();
   </script>
 </body>
