@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>owrapUI</title>
+  <link rel="icon" href="img/favicon.png" type="image/png" sizes="16x16">
   <style>
     :root {
       --bg: #06080f;
@@ -20,6 +21,7 @@
     body { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; margin: 0; padding: 0; background: radial-gradient(circle at 20% 20%, rgba(124,58,237,0.08), transparent 40%), radial-gradient(circle at 80% 0%, rgba(34,211,238,0.09), transparent 35%), var(--bg); color: var(--text); }
     header { padding: 14px 18px; background: linear-gradient(90deg, rgba(124,58,237,0.18), rgba(34,211,238,0.1)); display: flex; gap: 10px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(6px); }
     .header-left { display: flex; gap: 10px; align-items: center; }
+    .header-right { display: flex; gap: 10px; align-items: center; }
     #modalOverlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55); display: none; align-items: center; justify-content: center; backdrop-filter: blur(4px); z-index: 999; }
     #modalOverlay.show { display: flex; }
     .modal-card { width: min(92vw, 720px); background: var(--panel-2); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 20px 50px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.02); padding: 16px 18px 18px; color: var(--text); }
@@ -40,6 +42,7 @@
     .row { display: flex; gap: 10px; align-items: center; }
     .stack { display: flex; gap: 12px; flex-wrap: wrap; }
     .pill { padding: 6px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
+    .header-icon { width: 30px; height: 30px; border-radius: 8px; object-fit: cover; box-shadow: 0 4px 12px rgba(0,0,0,0.25); }
     h2 { margin: 0 0 12px; letter-spacing: 0.3px; }
     h3 { margin: 18px 0 8px; color: var(--accent-2); letter-spacing: 0.2px; }
     label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
@@ -72,13 +75,16 @@
 <body>
   <header>
     <div class="header-left">
+      <img class="header-icon" src="img/webui.png" alt="owrapUI" />
       <div class="pill" id="model">model: ...</div>
       <div class="pill" id="prompt">sys-prompt: loaded</div>
     </div>
-    <div class="pill" id="version">version: ...</div>
+    <div class="header-right">
+      <div class="pill" id="version">version: ...</div>
+    </div>
   </header>
   <main>
-    <h2>owrapUI</h2>
+    <!-- <h2>owrapUI</h2> -->
 
     <div class="panel" style="margin-bottom:16px;">
       <div class="stack">

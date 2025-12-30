@@ -28,7 +28,7 @@ type ChatMessage struct {
 	Content string `json:"content"`
 }
 
-//go:embed webui_static/*
+//go:embed webstatic/*
 var webStatic embed.FS
 
 type webSession struct {
@@ -496,7 +496,7 @@ func serveWebIndex(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data, err := webStatic.ReadFile("webui_static/index.html")
+	data, err := webStatic.ReadFile("webstatic/index.html")
 	if err != nil {
 		http.Error(w, "index missing", http.StatusInternalServerError)
 		return
