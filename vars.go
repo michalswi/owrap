@@ -10,7 +10,7 @@ const (
 	separator = "------------------------------------------------------------"
 )
 
-var version = "v0.3.0"
+var version = "v0.3.1"
 
 var defaultSystemPrompt = `
 You are a helpful, general-purpose assistant.
