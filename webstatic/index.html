@@ -53,6 +53,9 @@
     .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 14px; box-shadow: 0 12px 30px rgba(0,0,0,0.25); }
     .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+    .stats-grid.collapsed { display: none; }
+    .stats-header { cursor: pointer; user-select: none; }
+    .stats-header:hover h3 { color: var(--accent); }
     .stat-card { position: relative; padding: 16px 18px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.04); background: linear-gradient(135deg, rgba(124,58,237,0.16), rgba(34,211,238,0.14)), radial-gradient(circle at 12% 20%, rgba(124,58,237,0.15), transparent 45%), radial-gradient(circle at 80% 10%, rgba(34,211,238,0.16), transparent 40%), var(--panel-2); box-shadow: 0 18px 36px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.04); overflow: hidden; backdrop-filter: blur(6px); }
     .stat-card::before { content: ""; position: absolute; inset: 0; border-radius: 14px; background: linear-gradient(90deg, rgba(255,255,255,0.05), transparent); opacity: 0.8; pointer-events: none; }
     .stat-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; position: relative; z-index: 1; }
@@ -82,6 +85,7 @@
       <img class="header-icon" src="img/webui.png" alt="owrapUI" />
       <div class="pill" id="model">model: ...</div>
       <div class="pill" id="prompt">sys-prompt: loaded</div>
+      <div class="pill" id="session">session: new</div>
     </div>
     <div class="header-right">
       <div class="pill" id="version">version: ...</div>
@@ -89,18 +93,6 @@
   </header>
   <main>
     <!-- <h2>owrapUI</h2> -->
-
-    <div class="panel" style="margin-bottom:16px;">
-      <div class="stack">
-        <span class="pill" id="session">session: new</span>
-        <button id="showPrompt" type="button">Show sys-prompt</button>
-        <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
-        <button id="showHelp" type="button">/help</button>
-        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
-        <button id="autoOn" type="button">/auto-on</button>
-        <button id="autoOff" type="button">/auto-off</button>
-      </div>
-    </div>
 
     <div id="log"></div>
 
@@ -116,12 +108,26 @@
       </div>
     </div>
 
-    <div class="panel" style="margin-top:18px;">
-      <div class="row" style="justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <h3 style="margin:0; color: var(--text);">Live session stats</h3>
-        <span class="pill" style="background: rgba(34,211,238,0.12); color: #a5f3fc;">auto-updates</span>
+    <div class="panel" style="margin-top:16px;">
+      <div class="stack">
+        <button id="showPrompt" type="button">Show sys-prompt</button>
+        <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
+        <button id="showHelp" type="button">/help</button>
+        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
+        <button id="autoOn" type="button">/auto-on</button>
+        <button id="autoOff" type="button">/auto-off</button>
       </div>
-      <div class="stats-grid">
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
+      <div class="row stats-header" id="statsHeader" style="justify-content: space-between; align-items: center; margin-bottom: 10px;">
+        <div class="row" style="gap:8px; align-items: center;">
+          <h3 style="margin:0; color: var(--text);">session stats</h3>
+          <span class="pill" style="background: rgba(34,211,238,0.12); color: #a5f3fc;">auto-updates</span>
+        </div>
+        <span id="statsToggle" style="color: var(--muted); font-size: 18px;">▼</span>
+      </div>
+      <div class="stats-grid collapsed" id="statsGrid">
         <div class="stat-card">
           <div class="stat-top">
             <div class="stat-label">User messages</div>
@@ -178,6 +184,9 @@
     const modalTitle = document.getElementById('modalTitle');
     const modalBody = document.getElementById('modalBody');
     const modalClose = document.getElementById('modalClose');
+    const statsHeader = document.getElementById('statsHeader');
+    const statsGrid = document.getElementById('statsGrid');
+    const statsToggle = document.getElementById('statsToggle');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -190,6 +199,11 @@
     let sessionId = '';
     let currentStats = { ...emptyStats };
     let restoringState = false;
+
+    statsHeader.addEventListener('click', () => {
+      statsGrid.classList.toggle('collapsed');
+      statsToggle.textContent = statsGrid.classList.contains('collapsed') ? '▼' : '▲';
+    });
 
     function showModal(title, bodyHtml) {
       modalTitle.textContent = title;
