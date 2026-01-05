@@ -482,6 +482,7 @@ func startWebUI(bindAddr string) error {
 	mux.HandleFunc("/api/help", handleWebHelp)
 	mux.HandleFunc("/api/command", handleWebCommand)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	mux.HandleFunc("/api/ollama/status", handleOllamaStatus)
 
 	fileServer := http.FileServer(http.FS(webStatic))
 	mux.Handle("/static/", http.StripPrefix("/static/", fileServer))
@@ -517,6 +518,30 @@ func handleWebPrompt(w http.ResponseWriter, _ *http.Request) {
 
 func handleWebHelp(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"help": webHelpText})
+}
+
+func handleOllamaStatus(w http.ResponseWriter, _ *http.Request) {
+	// Try to ping Ollama with a minimal request
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	// Use the tags endpoint which is lightweight
+	baseURL := strings.TrimSuffix(ollamaURL, "/api/chat")
+	tagsURL := baseURL + "/api/tags"
+
+	resp, err := client.Get(tagsURL)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ready": false,
+			"error": err.Error(),
+		})
+		return
+	}
+	defer resp.Body.Close()
+
+	ready := resp.StatusCode == http.StatusOK
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"ready": ready,
+	})
 }
 
 func handleWebCommand(w http.ResponseWriter, r *http.Request) {

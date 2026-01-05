@@ -47,6 +47,12 @@
     .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); border-top-color: var(--accent-2); animation: spin 0.8s linear infinite; display: none; }
     .spinner.visible { display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
+    .status-indicator { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; }
+    .status-light { width: 10px; height: 10px; border-radius: 50%; background: #6b7280; transition: background 0.3s ease; }
+    .status-light.ready { background: #22c55e; box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); animation: pulse-green 2s ease-in-out infinite; }
+    .status-light.not-ready { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+    .status-light.checking { background: #f59e0b; }
+    @keyframes pulse-green { 0%, 100% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); } 50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.9); } }
     h2 { margin: 0 0 12px; letter-spacing: 0.3px; }
     h3 { margin: 18px 0 8px; color: var(--accent-2); letter-spacing: 0.2px; }
     label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
@@ -83,6 +89,10 @@
   <header>
     <div class="header-left">
       <img class="header-icon" src="img/webui.png" alt="owrapUI" />
+      <div class="status-indicator">
+        <div class="status-light" id="ollamaStatus" title="Ollama status"></div>
+        <span id="ollamaStatusText" style="color: var(--muted);">checking...</span>
+      </div>
       <div class="pill" id="model">model: ...</div>
       <div class="pill" id="prompt">sys-prompt: loaded</div>
       <div class="pill" id="session">session: new</div>
@@ -187,6 +197,8 @@
     const statsHeader = document.getElementById('statsHeader');
     const statsGrid = document.getElementById('statsGrid');
     const statsToggle = document.getElementById('statsToggle');
+    const ollamaStatusLight = document.getElementById('ollamaStatus');
+    const ollamaStatusText = document.getElementById('ollamaStatusText');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -275,6 +287,26 @@
       sessionEl.textContent = 'session: new';
       renderStats(emptyStats, true);
       saveState();
+    }
+
+    async function checkOllamaStatus() {
+      try {
+        const res = await fetch('/api/ollama/status');
+        const data = await res.json();
+        if (data.ready) {
+          ollamaStatusLight.className = 'status-light ready';
+          ollamaStatusText.textContent = 'ready';
+          ollamaStatusLight.title = 'Ollama is ready';
+        } else {
+          ollamaStatusLight.className = 'status-light not-ready';
+          ollamaStatusText.textContent = 'not ready';
+          ollamaStatusLight.title = data.error || 'Ollama is not responding';
+        }
+      } catch (e) {
+        ollamaStatusLight.className = 'status-light not-ready';
+        ollamaStatusText.textContent = 'error';
+        ollamaStatusLight.title = 'Failed to check Ollama status';
+      }
     }
 
     async function fetchPrompt() {
@@ -517,6 +549,9 @@
 
     const restored = loadState();
     fetchPrompt();
+    checkOllamaStatus();
+    // Check Ollama status every 10 seconds
+    setInterval(checkOllamaStatus, 10000);
     if (!restored) {
       renderStats(emptyStats, true);
     }
