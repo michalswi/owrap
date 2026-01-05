@@ -1,7 +1,7 @@
 GOLANG_VERSION := 1.25.5
 
 APP_NAME := owrap
-APP_VERSION := 0.3.1 # > vars.go + README.md
+APP_VERSION := 0.3.2 # > vars.go + README.md
 
 .DEFAULT_GOAL := help
 .PHONY: build_mac build_linux
