@@ -162,6 +162,14 @@
           <div class="stat-value" id="statCommands">0</div>
           <div class="stat-sub">Recent command appears in the log.</div>
         </div>
+        <div class="stat-card">
+          <div class="stat-top">
+            <div class="stat-label">Last response time</div>
+            <span class="stat-tag">time</span>
+          </div>
+          <div class="stat-value" id="statResponseTime">-</div>
+          <div class="stat-sub">Time taken for last response</div>
+        </div>
       </div>
     </div>
   </main>
@@ -204,13 +212,15 @@
       assistantMsgs: document.getElementById('statAssistantMessages'),
       commands: document.getElementById('statCommands'),
       userChars: document.getElementById('statUserChars'),
-      assistantChars: document.getElementById('statAssistantChars')
+      assistantChars: document.getElementById('statAssistantChars'),
+      responseTime: document.getElementById('statResponseTime')
     };
     const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
     const STORAGE_KEY = 'owrap_ui_state_v1';
     let sessionId = '';
     let currentStats = { ...emptyStats };
     let restoringState = false;
+    let lastResponseTime = null;
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -354,12 +364,19 @@
       setSending(true);
       appendSeparator();
       appendLine(`You: ${text}`, 'user');
+      const startTime = performance.now();
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId, message: text })
         });
+        const endTime = performance.now();
+        const responseTime = ((endTime - startTime) / 1000).toFixed(3);
+        lastResponseTime = responseTime;
+        if (statsEls.responseTime) {
+          statsEls.responseTime.textContent = `${responseTime}s`;
+        }
         if (!res.ok) {
           appendLine(`Error: ${res.status}`, 'error');
         } else {
@@ -384,6 +401,9 @@
           }
           if (data.assistantText && data.action !== 'run_command') {
             appendLine(`Assistant: ${data.assistantText}`, 'assistant');
+          }
+          if (lastResponseTime) {
+            appendLine(`⏱️  Response time: ${lastResponseTime}s`, 'plain');
           }
           modelEl.textContent = `model: ${data.model}`;
           if (data.stats) {
