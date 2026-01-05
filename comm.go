@@ -34,4 +34,7 @@ var allowedCommands = map[string]bool{
 	"tree":       true,
 	"terraform":  true,
 	"ansible":    true,
+	"bash":       true,
+	"sh":         true,
+	"ip":         true,
 }
