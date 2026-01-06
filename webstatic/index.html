@@ -18,6 +18,17 @@
       --accent-2: #22d3ee;
       --success: #22c55e;
     }
+    :root[data-theme="light"] {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --panel-2: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #7c3aed;
+      --accent-2: #0891b2;
+      --success: #16a34a;
+    }
     * { box-sizing: border-box; }
     body { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; margin: 0; padding: 0; background: radial-gradient(circle at 20% 20%, rgba(124,58,237,0.08), transparent 40%), radial-gradient(circle at 80% 0%, rgba(34,211,238,0.09), transparent 35%), var(--bg); color: var(--text); }
     header { padding: 14px 18px; background: linear-gradient(90deg, rgba(124,58,237,0.18), rgba(34,211,238,0.1)); display: flex; gap: 10px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(6px); }
@@ -35,6 +46,7 @@
     .modal-pre { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; white-space: pre-wrap; overflow: auto; max-height: 55vh; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 13px; line-height: 1.45; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
     main { padding: 20px; max-width: 1100px; margin: 0 auto; }
     #log { background: linear-gradient(180deg, rgba(17,24,39,0.9), rgba(13,17,26,0.95)); border: 1px solid var(--border); border-radius: 14px; padding: 14px; min-height: 360px; white-space: pre-wrap; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+    :root[data-theme="light"] #log { color: #ffffff; }
     textarea, input[type="text"] { width: 100%; padding: 12px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
     textarea { min-height: 120px; }
     button { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; border: none; border-radius: 10px; padding: 11px 16px; cursor: pointer; font-weight: 700; letter-spacing: 0.2px; box-shadow: 0 10px 30px rgba(124,58,237,0.35); transition: transform 120ms ease, box-shadow 120ms ease; }
@@ -53,6 +65,8 @@
     .status-light.not-ready { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
     .status-light.checking { background: #f59e0b; }
     @keyframes pulse-green { 0%, 100% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); } 50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.9); } }
+    .theme-toggle { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 16px; transition: all 0.2s ease; }
+    .theme-toggle:hover { background: var(--border); }
     h2 { margin: 0 0 12px; letter-spacing: 0.3px; }
     h3 { margin: 18px 0 8px; color: var(--accent-2); letter-spacing: 0.2px; }
     label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
@@ -77,6 +91,7 @@
     .log-command { color: #22d3ee; }
     .log-error { color: #ef4444; }
     .log-plain { color: var(--text); }
+    :root[data-theme="light"] #log .log-plain { color: #ffffff; }
     .label-user { color: #fbbf24; font-weight: 700; }
     .label-assistant { color: #22c55e; font-weight: 700; }
     .log-sep { border-bottom: 2px dashed #22d3ee; opacity: 0.85; margin: 10px 0 12px; }
@@ -98,6 +113,7 @@
       <div class="pill" id="session">session: new</div>
     </div>
     <div class="header-right">
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle theme">🌙</button>
       <div class="pill" id="version">version: ...</div>
     </div>
   </header>
@@ -209,6 +225,7 @@
     const statsToggle = document.getElementById('statsToggle');
     const ollamaStatusLight = document.getElementById('ollamaStatus');
     const ollamaStatusText = document.getElementById('ollamaStatusText');
+    const themeToggle = document.getElementById('themeToggle');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -219,6 +236,7 @@
     };
     const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
     const STORAGE_KEY = 'owrap_ui_state_v1';
+    const THEME_KEY = 'owrap_theme';
     let sessionId = '';
     let currentStats = { ...emptyStats };
     let restoringState = false;
@@ -467,6 +485,25 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
+    function initTheme() {
+      const savedTheme = localStorage.getItem(THEME_KEY) || 'dark';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      updateThemeIcon(savedTheme);
+    }
+
+    function updateThemeIcon(theme) {
+      themeToggle.textContent = theme === 'light' ? '🌙' : '☀️';
+      themeToggle.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+    }
+
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem(THEME_KEY, newTheme);
+      updateThemeIcon(newTheme);
+    }
+
     function ansiToHtml(text) {
       // Escape HTML first; ANSI codes will be converted back to spans.
       const parts = text.split(/(\x1b\[[0-9;]*m)/g);
@@ -566,6 +603,7 @@
 
     sendBtn.addEventListener('click', send);
     helpBtn.addEventListener('click', fetchHelp);
+    themeToggle.addEventListener('click', toggleTheme);
     msgEl.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -576,6 +614,7 @@
       }
     });
 
+    initTheme();
     const restored = loadState();
     fetchPrompt();
     checkOllamaStatus();
