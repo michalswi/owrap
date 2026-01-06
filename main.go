@@ -923,18 +923,76 @@ func buildSession(model string, stats *Stats) Session {
 	}
 }
 
-// saveSessionToFile saves the provided Session as a timestamped JSON file in /tmp.
-func saveSessionToFile(session Session) error {
-	timestamp := time.Now().UTC().Format("20060102_1504")
-	filename := filepath.Join("/tmp", fmt.Sprintf("owrap_%s.json", timestamp))
+// saveSessionToFile saves the provided Session as a named JSON file in /tmp/sessions.
+func saveSessionToFile(session Session, name string) (string, error) {
+	sessionsDir := "/tmp/sessions"
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create sessions directory: %w", err)
+	}
+
+	var filename string
+	if name == "" {
+		// Auto-generate name with timestamp
+		timestamp := time.Now().UTC().Format("20060102_1504")
+		filename = filepath.Join(sessionsDir, fmt.Sprintf("owrap_%s.json", timestamp))
+	} else {
+		// Use provided name
+		if !strings.HasSuffix(name, ".json") {
+			name = name + ".json"
+		}
+		filename = filepath.Join(sessionsDir, name)
+	}
+
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal session: %w", err)
+		return "", fmt.Errorf("failed to marshal session: %w", err)
 	}
 	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return fmt.Errorf("failed to write session to %s: %w", filename, err)
+		return "", fmt.Errorf("failed to write session to %s: %w", filename, err)
 	}
-	return nil
+	return filename, nil
+}
+
+// loadSessionFromFile loads a session from /tmp/sessions by name.
+func loadSessionFromFile(name string) (*Session, error) {
+	sessionsDir := "/tmp/sessions"
+	if !strings.HasSuffix(name, ".json") {
+		name = name + ".json"
+	}
+	filename := filepath.Join(sessionsDir, name)
+
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read session from %s: %w", filename, err)
+	}
+
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
+	}
+
+	return &session, nil
+}
+
+// listSessions returns a list of saved session files in /tmp/sessions.
+func listSessions() ([]string, error) {
+	sessionsDir := "/tmp/sessions"
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
+	}
+
+	var sessions []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			sessions = append(sessions, entry.Name())
+		}
+	}
+	sort.Strings(sessions)
+	return sessions, nil
 }
 
 func saveWebSession(sess *webSession) (string, error) {
@@ -1107,8 +1165,16 @@ func main() {
 				}
 				continue
 			} else {
+				beforeLoadLen := len(sessionMessages)
 				handled := handleSlashCommand(userInput, stats)
 				if handled {
+					// Check if session was loaded (sessionMessages changed significantly)
+					if len(sessionMessages) != beforeLoadLen && len(sessionMessages) > 0 {
+						// Rebuild messages array from loaded session
+						messages = []ChatMessage{{Role: "system", Content: systemPrompt}}
+						messages = append(messages, sessionMessages...)
+						fmt.Println(info("Conversation context restored - you can continue from here."))
+					}
 					continue
 				}
 				// Fall through if unknown slash command; let model handle text
@@ -1145,6 +1211,7 @@ func main() {
 			// Model didn’t stick to JSON; just print raw
 			fmt.Println(assistantLabel(), raw)
 			messages = append(messages, ChatMessage{Role: "assistant", Content: raw})
+			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: raw})
 			continue
 		}
 
@@ -1209,6 +1276,7 @@ func main() {
 		default:
 			fmt.Println("Assistant (unknown action):", raw)
 			messages = append(messages, ChatMessage{Role: "assistant", Content: raw})
+			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: raw})
 		}
 	}
 }
