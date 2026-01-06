@@ -131,12 +131,14 @@ type webCommandResponse struct {
 }
 
 const webHelpText = `Web UI commands:
-/auto-on     Enable automatic analysis after commands
-/auto-off    Disable automatic analysis after commands
-/save        Save current web session to /tmp as JSON
-/last        Show last prompt and assistant reply
-/stats       Show live session stats (also visible in UI)
-/allowedcomm Show the allowlisted shell commands
+/auto-on       Enable automatic analysis after commands
+/auto-off      Disable automatic analysis after commands
+/save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
+/load NAME     Load a saved session by name
+/sessions      List all saved sessions in /tmp/sessions
+/last          Show last prompt and assistant reply
+/stats         Show live session stats (also visible in UI)
+/allowedcomm   Show the allowlisted shell commands
 `
 
 type Session struct {
@@ -666,24 +668,6 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			Stats:         sess.Stats,
 		})
 		return
-	case "/save":
-		path, err := saveWebSession(sess)
-		text := "Session saved."
-		if err != nil {
-			text = fmt.Sprintf("Save failed: %v", err)
-		} else if path != "" {
-			text = fmt.Sprintf("Session saved to %s", path)
-		}
-		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:     sess.ID,
-			Action:        "answer",
-			AssistantText: text,
-			Messages:      sess.Messages,
-			Model:         modelName,
-			Timestamp:     time.Now().UTC(),
-			Stats:         sess.Stats,
-		})
-		return
 	case "/stats", "/s":
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,
@@ -706,6 +690,107 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			Stats:         sess.Stats,
 		})
 		return
+	default:
+		// Check for /save with optional name
+		if strings.HasPrefix(lower, "/save") {
+			parts := strings.Fields(req.Message)
+			var sessionName string
+			if len(parts) > 1 {
+				sessionName = parts[1]
+			}
+			session := Session{
+				Timestamp:    time.Now().UTC().Format(time.RFC3339),
+				Model:        modelName,
+				Messages:     sess.Messages,
+				Stats:        sess.Stats,
+				CachedBlocks: nil,
+			}
+			path, err := saveSessionToFile(session, sessionName)
+			text := "Session saved."
+			if err != nil {
+				text = fmt.Sprintf("Save failed: %v", err)
+			} else if path != "" {
+				text = fmt.Sprintf("Session saved to %s", path)
+			}
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "answer",
+				AssistantText: text,
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+		// Check for /load <name>
+		if strings.HasPrefix(lower, "/load") {
+			parts := strings.Fields(req.Message)
+			if len(parts) < 2 {
+				writeJSON(w, http.StatusOK, webChatResponse{
+					SessionID:     sess.ID,
+					Action:        "answer",
+					AssistantText: "Usage: /load <session-name>",
+					Messages:      sess.Messages,
+					Model:         modelName,
+					Timestamp:     time.Now().UTC(),
+					Stats:         sess.Stats,
+				})
+				return
+			}
+			sessionName := parts[1]
+			loadedSession, err := loadSessionFromFile(sessionName)
+			if err != nil {
+				writeJSON(w, http.StatusOK, webChatResponse{
+					SessionID:     sess.ID,
+					Action:        "answer",
+					AssistantText: fmt.Sprintf("Load failed: %v", err),
+					Messages:      sess.Messages,
+					Model:         modelName,
+					Timestamp:     time.Now().UTC(),
+					Stats:         sess.Stats,
+				})
+				return
+			}
+			// Restore session data
+			sess.Messages = loadedSession.Messages
+			sess.Stats = loadedSession.Stats
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "session_loaded",
+				AssistantText: fmt.Sprintf("Session '%s' loaded successfully. Messages: %d user, %d assistant. You can continue from here.", sessionName, loadedSession.Stats.UserMessages, loadedSession.Stats.AssistantMessages),
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+		// Check for /sessions or /list
+		if lower == "/sessions" || lower == "/list" {
+			sessions, err := listSessions()
+			text := ""
+			if err != nil {
+				text = fmt.Sprintf("Failed to list sessions: %v", err)
+			} else if len(sessions) == 0 {
+				text = "No saved sessions found in /tmp/sessions"
+			} else {
+				text = fmt.Sprintf("Saved sessions (%d):\n", len(sessions))
+				for _, name := range sessions {
+					text += fmt.Sprintf("  %s\n", name)
+				}
+			}
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "answer",
+				AssistantText: text,
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
 	}
 	sess.Stats.recordUser(req.Message)
 	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: req.Message})

@@ -128,6 +128,8 @@
         <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
         <button id="showHelp" type="button">/help</button>
         <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
+        <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
+        <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
         <button id="autoOn" type="button">/auto-on</button>
         <button id="autoOff" type="button">/auto-off</button>
       </div>
@@ -208,6 +210,8 @@
     const helpBtn = document.getElementById('showHelp');
     const clearBtn = document.getElementById('clearChat');
     const saveBtn = document.getElementById('saveSession');
+    const loadBtn = document.getElementById('loadSession');
+    const listBtn = document.getElementById('listSessions');
     const autoOnBtn = document.getElementById('autoOn');
     const autoOffBtn = document.getElementById('autoOff');
     const modelEl = document.getElementById('model');
@@ -265,7 +269,9 @@
       if (e.key === 'Escape') closeModal();
     });
     clearBtn.addEventListener('click', clearChat);
-    saveBtn.addEventListener('click', () => sendText('/save'));
+    saveBtn.addEventListener('click', showSaveDialog);
+    loadBtn.addEventListener('click', showLoadDialog);
+    listBtn.addEventListener('click', () => sendText('/sessions'));
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
 
@@ -317,6 +323,139 @@
       sessionEl.textContent = 'session: new';
       renderStats(emptyStats, true);
       saveState();
+    }
+
+    function showSaveDialog() {
+      const bodyHtml = `
+        <div class="modal-subtitle">Save your current session to /tmp/sessions</div>
+        <label style="margin-top:12px; display:block;">Session name (optional):</label>
+        <input type="text" id="saveSessionInput" placeholder="Leave empty for auto-generated name (owrap_YYYYMMDD_HHMM.json)" style="margin-top:6px;">
+        <div style="margin-top:12px; display:flex; gap:10px;">
+          <button id="saveSessionConfirm" type="button">Save</button>
+          <button id="saveSessionCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+        </div>
+      `;
+      showModal('Save Session', bodyHtml);
+      
+      const input = document.getElementById('saveSessionInput');
+      const confirmBtn = document.getElementById('saveSessionConfirm');
+      const cancelBtn = document.getElementById('saveSessionCancel');
+      
+      input.focus();
+      
+      const doSave = () => {
+        const name = input.value.trim();
+        const cmd = name ? `/save ${name}` : '/save';
+        closeModal();
+        sendText(cmd);
+      };
+      
+      confirmBtn.addEventListener('click', doSave);
+      cancelBtn.addEventListener('click', closeModal);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          doSave();
+        }
+      });
+    }
+
+    function showLoadDialog() {
+      // First fetch available sessions
+      fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, message: '/sessions' })
+      })
+      .then(res => res.json())
+      .then(data => {
+        let sessionsList = '';
+        if (data.assistantText && data.assistantText.includes('Saved sessions')) {
+          const lines = data.assistantText.split('\n');
+          const sessions = lines.slice(1).map(l => l.trim()).filter(l => l && l.endsWith('.json'));
+          if (sessions.length > 0) {
+            sessionsList = '<div class="modal-subtitle">Available sessions:</div><div style="background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; max-height: 150px; overflow-y: auto; font-size: 13px;">';
+            sessions.forEach(s => {
+              sessionsList += `<div style="padding: 4px 0; color: var(--accent-2);">• ${escapeHtml(s)}</div>`;
+            });
+            sessionsList += '</div>';
+          } else {
+            sessionsList = '<div style="color: var(--muted); font-size: 13px; margin: 8px 0;">No saved sessions found.</div>';
+          }
+        } else {
+          sessionsList = '<div style="color: var(--muted); font-size: 13px; margin: 8px 0;">No saved sessions found.</div>';
+        }
+        
+        const bodyHtml = `
+          ${sessionsList}
+          <label style="margin-top:12px; display:block;">Session name to load:</label>
+          <input type="text" id="loadSessionInput" placeholder="Enter session name (e.g., mysession.json or mysession)" style="margin-top:6px;">
+          <div style="margin-top:12px; display:flex; gap:10px;">
+            <button id="loadSessionConfirm" type="button">Load</button>
+            <button id="loadSessionCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+          </div>
+        `;
+        showModal('Load Session', bodyHtml);
+        
+        const input = document.getElementById('loadSessionInput');
+        const confirmBtn = document.getElementById('loadSessionConfirm');
+        const cancelBtn = document.getElementById('loadSessionCancel');
+        
+        input.focus();
+        
+        const doLoad = () => {
+          const name = input.value.trim();
+          if (!name) {
+            input.style.borderColor = '#ef4444';
+            return;
+          }
+          closeModal();
+          sendText(`/load ${name}`);
+        };
+        
+        confirmBtn.addEventListener('click', doLoad);
+        cancelBtn.addEventListener('click', closeModal);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            doLoad();
+          }
+        });
+      })
+      .catch(() => {
+        const bodyHtml = `
+          <div style="color: var(--muted); font-size: 13px; margin: 8px 0;">Could not fetch session list.</div>
+          <label style="margin-top:12px; display:block;">Session name to load:</label>
+          <input type="text" id="loadSessionInput" placeholder="Enter session name" style="margin-top:6px;">
+          <div style="margin-top:12px; display:flex; gap:10px;">
+            <button id="loadSessionConfirm" type="button">Load</button>
+            <button id="loadSessionCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+          </div>
+        `;
+        showModal('Load Session', bodyHtml);
+        
+        const input = document.getElementById('loadSessionInput');
+        const confirmBtn = document.getElementById('loadSessionConfirm');
+        const cancelBtn = document.getElementById('loadSessionCancel');
+        
+        input.focus();
+        
+        const doLoad = () => {
+          const name = input.value.trim();
+          if (!name) return;
+          closeModal();
+          sendText(`/load ${name}`);
+        };
+        
+        confirmBtn.addEventListener('click', doLoad);
+        cancelBtn.addEventListener('click', closeModal);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            doLoad();
+          }
+        });
+      });
     }
 
     async function checkOllamaStatus() {
@@ -410,7 +549,29 @@
           const data = await res.json();
           sessionId = data.sessionId;
           sessionEl.textContent = `session: ${sessionId}`;
-          if (data.action === 'run_command') {
+          
+          // Handle session_loaded action - clear log and display all messages
+          if (data.action === 'session_loaded') {
+            logEl.innerHTML = '';
+            appendLine(`✓ ${data.assistantText}`, 'assistant');
+            appendSeparator();
+            
+            // Display all loaded messages
+            for (const msg of data.messages) {
+              if (msg.role === 'system') continue;
+              if (msg.role === 'user') {
+                appendSeparator();
+                appendLine(`You: ${msg.content}`, 'user');
+              } else if (msg.role === 'assistant') {
+                appendLine(`Assistant: ${msg.content}`, 'assistant');
+              }
+            }
+            
+            // Update stats
+            if (data.stats) {
+              renderStats(data.stats);
+            }
+          } else if (data.action === 'run_command') {
             appendLine(`Assistant [Running]: ${data.command}`, 'assistant');
             appendLine('[Command output]:', 'assistant');
             appendLine(data.commandOutput || '(no output)', 'command');
