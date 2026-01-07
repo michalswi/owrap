@@ -11,14 +11,15 @@
 [![security](https://img.shields.io/badge/For-whatever-8B0000.svg?style=for-the-badge)](#)
 [![ai](https://img.shields.io/badge/AI-Powered-cyan.svg?style=for-the-badge)](#)
 
+![img](./img/owrapui.png)
 
 </div>
 
-**owrap** is local Go CLI (+ webUI) wrapper around Ollama that:
+**owrap** is local golang based CLI (+ webUI) wrapper around Ollama that:
 
 - sends your text to the Ollama HTTP chat endpoint with the configured model
 - when asked, runs [allowlisted](./comm.go#L3) shell commands locally, captures stdout/stderr, and feeds that output back as a chat message so the model can continue
-- maintains a session log (user/assistant messages, stats) in memory; you can save it to tmp with /save
+- maintains a session log (user/assistant messages, stats) in memory; you can save it to tmp with /save and later on /load
 - provides slash commands for help, stats, cached blocks, exec file, etc.
 - app works either in terminal or in webui
 - all interaction stays on your machine
@@ -50,7 +51,9 @@ Available commands:
   /s, /stats    Show session stats (counts, chars, last command)
   /last         Show last prompt + model answer
   /sysprompt    Show current system prompt
-  /save         Save current session to /tmp as JSON (includes cached blocks)
+  /save [NAME]  Save current session to /tmp/sessions (auto-named if NAME omitted)
+  /load NAME    Load a saved session by name
+  /sessions     List all saved sessions in /tmp/sessions
   /p [DELIM]    Paste multi-line input; finish with a line containing only DELIM (default EOF)
   /cache        List cached (not sent) blocks
   /use N        Send cached block #N (1-based) with optional question
@@ -58,7 +61,7 @@ Available commands:
   /auto-off     [default] Disable automatic analysis after commands
   /execfile P   Execute each non-empty line in file P (no analysis)
 Model-run allowed commands:
-  [arp, cat, chmod, curl, dig, echo, ffuf, find, for, grep, head, httpx, ls, nc, netcat, nmap, nslookup, ping, pwd, sort, subfinder, tail, telnet, traceroute, uniq, wc, wget, while, whois]
+  [ansible, arp, bash, cat, chmod, curl, date, dig, echo, ffuf, find, for, grep, head, httpx, ip, ls, nc, netcat, nmap, nslookup, ping, pwd, sh, sort, subfinder, tail, telnet, terraform, traceroute, tree, uniq, wc, wget, while, whois]
 ------------------------------------------------------------
 
 > [webui version] described below 
