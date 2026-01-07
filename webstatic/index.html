@@ -322,6 +322,10 @@
       sessionId = '';
       sessionEl.textContent = 'session: new';
       renderStats(emptyStats, true);
+      lastResponseTime = null;
+      if (quickResponseTime) {
+        quickResponseTime.style.display = 'none';
+      }
       saveState();
     }
 
