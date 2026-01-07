@@ -52,6 +52,11 @@
     button { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; border: none; border-radius: 10px; padding: 11px 16px; cursor: pointer; font-weight: 700; letter-spacing: 0.2px; box-shadow: 0 10px 30px rgba(124,58,237,0.35); transition: transform 120ms ease, box-shadow 120ms ease; }
     button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
     button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 32px rgba(34,211,238,0.35); }
+    .file-upload-btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #f59e0b, #d97706); }
+    .file-upload-btn input[type="file"] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .file-name { font-size: 11px; color: var(--muted); margin-left: 8px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .info-icon { position: relative; z-index: 10; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,0.15); color: #ffffff; font-size: 11px; cursor: pointer; transition: all 0.2s ease; margin-left: 2px; pointer-events: auto; }
+    .info-icon:hover { background: rgba(255,255,255,0.25); transform: scale(1.15); }
     .row { display: flex; gap: 10px; align-items: center; }
     .stack { display: flex; gap: 12px; flex-wrap: wrap; }
     .pill { padding: 6px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
@@ -132,6 +137,12 @@
         <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
         <button id="autoOn" type="button">/auto-on</button>
         <button id="autoOff" type="button">/auto-off</button>
+        <button class="file-upload-btn" type="button">
+          📎 Upload File
+          <span class="info-icon" id="fileUploadInfo" title="Click for file upload info">ℹ️</span>
+          <input type="file" id="fileUpload" accept="*/*" />
+        </button>
+        <span id="fileName" class="file-name"></span>
       </div>
     </div>
 
@@ -230,6 +241,9 @@
     const ollamaStatusLight = document.getElementById('ollamaStatus');
     const ollamaStatusText = document.getElementById('ollamaStatusText');
     const themeToggle = document.getElementById('themeToggle');
+    const fileUpload = document.getElementById('fileUpload');
+    const fileNameDisplay = document.getElementById('fileName');
+    const fileUploadInfo = document.getElementById('fileUploadInfo');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -245,6 +259,7 @@
     let currentStats = { ...emptyStats };
     let restoringState = false;
     let lastResponseTime = null;
+    let pendingFile = null;
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -274,6 +289,42 @@
     listBtn.addEventListener('click', () => sendText('/sessions'));
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
+    fileUploadInfo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      showFileUploadInfo();
+    });
+
+    function showFileUploadInfo() {
+      const infoHtml = `
+        <div class="modal-subtitle">One-time file analysis workflow</div>
+        <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">How it works:</div>
+          <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
+            <li>Click "📎 Upload File" and select a file</li>
+            <li>Write a prompt (e.g., "summarize", "find bugs", "explain")</li>
+            <li>Click Send - file content is sent to Ollama with your prompt</li>
+            <li>File is cleared after sending (one-time analysis)</li>
+          </ol>
+        </div>
+        <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight: 700; margin-bottom: 8px; color: var(--success);">✓ Supported files:</div>
+          <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+            <li><strong>Text files:</strong> .txt, .md, .json, .xml, .csv, .yaml, .yml, .toml, .ini, .conf, .log</li>
+            <li><strong>Code files:</strong> .py, .go, .js, .ts, .java, .c, .cpp, .h, .sh, .html, .css</li>
+          </ul>
+        </div>
+        <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px;">
+          <div style="font-weight: 700; margin-bottom: 8px; color: #ef4444;">✗ Not supported:</div>
+          <ul style="margin: 0; padding-left: 20px; line-height: 1.8; color: var(--muted);">
+            <li><strong>Images:</strong> Metadata only (requires vision model + backend support)</li>
+            <li><strong>PDFs:</strong> Metadata only (requires PDF extraction)</li>
+            <li><strong>Binary files:</strong> Metadata only</li>
+          </ul>
+        </div>
+      `;
+      showModal('File Upload Info', infoHtml);
+    }
 
     function saveState() {
       if (restoringState) return;
@@ -326,6 +377,11 @@
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
+      pendingFile = null;
+      fileUpload.value = '';
+      fileNameDisplay.textContent = '';
+      fileNameDisplay.style.color = 'var(--muted)';
+      msgEl.placeholder = 'Type a message or command for the assistant.';
       saveState();
     }
 
@@ -517,19 +573,41 @@
     }
 
     async function send() {
-      const text = msgEl.value.trim();
-      if (!text) return;
-      await sendText(text, true);
+      let text = msgEl.value.trim();
+      if (!text && !pendingFile) return;
+      
+      let displayText = text;
+      let apiText = text;
+      
+      if (pendingFile) {
+        const fileInfo = `[File: ${pendingFile.name}, Size: ${(pendingFile.size / 1024).toFixed(1)} KB]`;
+        const userPrompt = text || 'Please analyze this file.';
+        
+        // For display: show only prompt + file info
+        displayText = `${userPrompt} ${fileInfo}`;
+        
+        // For API: send prompt + file info + full content
+        apiText = `${userPrompt}\n\n${fileInfo}\n\n${pendingFile.content}`;
+        
+        // Clear pending file
+        pendingFile = null;
+        fileUpload.value = '';
+        fileNameDisplay.textContent = '';
+        fileNameDisplay.style.color = 'var(--muted)';
+        msgEl.placeholder = 'Type a message or command for the assistant.';
+      }
+      
+      await sendText(apiText, true, displayText);
     }
 
-    async function sendText(text, fromInput = false) {
+    async function sendText(text, fromInput = false, displayText = null) {
       if (!text) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
       setSending(true);
       appendSeparator();
-      appendLine(`You: ${text}`, 'user');
+      appendLine(`You: ${displayText || text}`, 'user');
       const startTime = performance.now();
       try {
         const res = await fetch('/api/chat', {
@@ -764,6 +842,58 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    fileUpload.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      fileNameDisplay.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Ready`;
+      fileNameDisplay.style.color = 'var(--success)';
+      
+      try {
+        const content = await readFileContent(file);
+        pendingFile = {
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          content: content
+        };
+        msgEl.placeholder = `What would you like me to do with ${file.name}?`;
+        msgEl.focus();
+      } catch (err) {
+        appendLine(`Error reading file: ${err.message}`, 'error');
+        fileNameDisplay.textContent = '';
+        fileNameDisplay.style.color = 'var(--muted)';
+        e.target.value = '';
+        pendingFile = null;
+      }
+    });
+
+    async function readFileContent(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        // Check if file is likely binary
+        const textExtensions = ['.txt', '.md', '.json', '.xml', '.csv', '.html', '.css', '.js', '.ts', '.py', '.go', '.java', '.c', '.cpp', '.h', '.sh', '.yaml', '.yml', '.toml', '.ini', '.conf', '.log'];
+        const isLikelyText = textExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+        
+        if (isLikelyText || file.type.startsWith('text/')) {
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = () => reject(new Error('Failed to read file'));
+          reader.readAsText(file);
+        } else if (file.type.startsWith('image/')) {
+          reader.onload = (e) => {
+            const base64 = e.target.result.split(',')[1];
+            resolve(`[IMAGE DATA - Base64 encoded]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: This is an image file. If using a vision model, the base64 data would be: ${base64.substring(0, 100)}...`);
+          };
+          reader.onerror = () => reject(new Error('Failed to read image'));
+          reader.readAsDataURL(file);
+        } else {
+          // For other binary files, provide metadata
+          resolve(`[BINARY FILE]\nFilename: ${file.name}\nType: ${file.type || 'unknown'}\nSize: ${file.size} bytes\n\nThis appears to be a binary file. Please extract text content or convert to a readable format first.`);
+        }
+      });
     }
 
     sendBtn.addEventListener('click', send);
