@@ -273,8 +273,9 @@ The system prompt defines the assistant's behavior and capabilities. The default
 - `cloud_engineer.txt` - Cloud infrastructure and DevOps helper
 - `japanese_teacher.txt` - Japanese language learning assistant
 - `local_network_recon.txt` - Local network reconnaissance guide
-- `recon.txt` - General reconnaissance assistant
+- `web_recon.txt` - General web (OWASP based) reconnaissance assistant
 - `shell_command_assistant.txt` - Shell command helper and executor
+- `prompt_engineer.txt` - System prompts creation assistant
 
 **How to use**:
 - **At startup**: `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt ./owrap`
