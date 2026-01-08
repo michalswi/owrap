@@ -93,14 +93,19 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 - **URL** to connect to Ollama: `http://localhost:11434/api/chat` (override with env var `OLLAMA_URL`)
 - **LLM model**: `gemma3:4b` (override with env var `OLLAMA_MODEL`)
 - **System prompt**: Defined [here](./vars.go) by default. You can:
-  - Set `SYSTEM_PROMPT` env var to a prompt file path (e.g., `./prompts/recon.txt`) to load at startup
-  - Use `/editsysprompt` (terminal) or "Edit sys-prompt" button (web UI) to change it at runtime
+  - Set `SYSTEM_PROMPT` env var to a prompt file path (e.g., `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt`) to load at startup
+  - Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI) to change it at runtime
+  - Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI) to display the current one
   - Falls back to default if the file cannot be read
+  - Find more about available prompts [here](#-system-prompts)
 - **Web UI port**: `:8080` (override with env var `WEB_BIND`)
 
 ### > run app [terminal version]
 
 ```
+$ you might use predefined system prompts from ./prompts,
+include 'prompts' dir in the same folder where 'owrap' app
+
 $ ./owrap
 
  ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
@@ -138,6 +143,9 @@ You:
 
 ### > run app [webui version]
 ```
+$ you might use predefined system prompts from ./prompts,
+include 'prompts' dir in the same folder where 'owrap' app
+
 $ ./owrap -web
 2025/12/28 16:19:44 web UI listening on :8080 (model=gemma3:4b, prompt=default, chars=481)
 
@@ -255,6 +263,26 @@ Analysis:
 (...)
 ------------------------------------------------------------
 ```
+
+## \# System Prompts
+
+The system prompt defines the assistant's behavior and capabilities. The default prompt is defined [here](./vars.go).
+
+**Predefined prompts** available in `./prompts/`:
+- `apps_developer.txt` - Application development assistant
+- `cloud_engineer.txt` - Cloud infrastructure and DevOps helper
+- `japanese_teacher.txt` - Japanese language learning assistant
+- `local_network_recon.txt` - Local network reconnaissance guide
+- `recon.txt` - General reconnaissance assistant
+- `shell_command_assistant.txt` - Shell command helper and executor
+
+**How to use**:
+- **At startup**: `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt ./owrap`
+- **At runtime**: Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI)
+- **View current**: Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI)
+
+**Creating custom prompts**: Create a `.txt` file in the `./prompts/` directory with your instructions. The prompt should define the assistant's role, capabilities, and response format 
+
 
 ## \# Disclaimer
 
