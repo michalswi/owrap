@@ -75,7 +75,7 @@ Usage of ./owrap:
     	serve the web UI instead of the CLI
 ```
 
-## Quickstart
+## Quickstart [terminal + webui]
 
 ### > prereq
 
@@ -155,7 +155,57 @@ $ open in web browser http://localhost:8080/
 ![owrapui](./img/owrapui.png)
 
 
-### > examples
+## \# Quickstart [docker]
+
+### > prereq
+
+App requires that Ollama is up and running, e.g.
+```
+> OLLAMA_HOST because we need IP instead of localhost
+$ OLLAMA_HOST=0.0.0.0 ollama serve
+(...)
+
+$ ollama ls
+NAME                  ID              SIZE      MODIFIED
+gemma3:4b             a2af6cc3eb7f    3.3 GB    5 days ago
+llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
+```
+
+### > run docker
+
+```
+$ docker run -d --rm \
+--name owrap \
+-e OLLAMA_URL="http://<your_ip>:11434/api/chat" \
+-p 8080:8080 \
+michalsw/owrap:latest
+
+$ docker ps
+
+$ docker stop owrap
+```
+
+## \# System Prompts
+
+The system prompt defines the assistant's behavior and capabilities. The default prompt is defined [here](./vars.go).
+
+**Predefined prompts** available in `./prompts/`:
+- `apps_developer.txt` - Application development assistant
+- `cloud_engineer.txt` - Cloud infrastructure and DevOps helper
+- `japanese_teacher.txt` - Japanese language learning assistant
+- `local_network_recon.txt` - Local network reconnaissance guide
+- `web_recon.txt` - General web (OWASP based) reconnaissance assistant
+- `shell_command_assistant.txt` - Shell command helper and executor
+- `prompt_engineer.txt` - System prompts creation assistant
+
+**How to use**:
+- **At startup**: `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt ./owrap`
+- **At runtime**: Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI)
+- **View current**: Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI)
+
+**Creating custom prompts**: Create a `.txt` file in the `./prompts/` directory with your instructions. The prompt should define the assistant's role, capabilities, and response format
+
+## \# Examples
 
 **adjust** the system prompt for you needs. it's **very** important because your answers depends on it. run app.
 
@@ -263,27 +313,6 @@ Analysis:
 (...)
 ------------------------------------------------------------
 ```
-
-## \# System Prompts
-
-The system prompt defines the assistant's behavior and capabilities. The default prompt is defined [here](./vars.go).
-
-**Predefined prompts** available in `./prompts/`:
-- `apps_developer.txt` - Application development assistant
-- `cloud_engineer.txt` - Cloud infrastructure and DevOps helper
-- `japanese_teacher.txt` - Japanese language learning assistant
-- `local_network_recon.txt` - Local network reconnaissance guide
-- `web_recon.txt` - General web (OWASP based) reconnaissance assistant
-- `shell_command_assistant.txt` - Shell command helper and executor
-- `prompt_engineer.txt` - System prompts creation assistant
-
-**How to use**:
-- **At startup**: `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt ./owrap`
-- **At runtime**: Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI)
-- **View current**: Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI)
-
-**Creating custom prompts**: Create a `.txt` file in the `./prompts/` directory with your instructions. The prompt should define the assistant's role, capabilities, and response format 
-
 
 ## \# Disclaimer
 
