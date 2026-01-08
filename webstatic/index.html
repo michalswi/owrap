@@ -18,6 +18,17 @@
       --accent-2: #22d3ee;
       --success: #22c55e;
     }
+    :root[data-theme="light"] {
+      --bg: #f8fafc;
+      --panel: #ffffff;
+      --panel-2: #f1f5f9;
+      --border: #e2e8f0;
+      --text: #0f172a;
+      --muted: #64748b;
+      --accent: #7c3aed;
+      --accent-2: #0891b2;
+      --success: #16a34a;
+    }
     * { box-sizing: border-box; }
     body { font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; margin: 0; padding: 0; background: radial-gradient(circle at 20% 20%, rgba(124,58,237,0.08), transparent 40%), radial-gradient(circle at 80% 0%, rgba(34,211,238,0.09), transparent 35%), var(--bg); color: var(--text); }
     header { padding: 14px 18px; background: linear-gradient(90deg, rgba(124,58,237,0.18), rgba(34,211,238,0.1)); display: flex; gap: 10px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border); position: sticky; top: 0; backdrop-filter: blur(6px); }
@@ -35,11 +46,17 @@
     .modal-pre { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 12px; white-space: pre-wrap; overflow: auto; max-height: 55vh; font-family: "JetBrains Mono", "SFMono-Regular", Consolas, monospace; font-size: 13px; line-height: 1.45; box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
     main { padding: 20px; max-width: 1100px; margin: 0 auto; }
     #log { background: linear-gradient(180deg, rgba(17,24,39,0.9), rgba(13,17,26,0.95)); border: 1px solid var(--border); border-radius: 14px; padding: 14px; min-height: 360px; white-space: pre-wrap; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.35); }
+    :root[data-theme="light"] #log { color: #ffffff; }
     textarea, input[type="text"] { width: 100%; padding: 12px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--text); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02); }
     textarea { min-height: 120px; }
     button { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: white; border: none; border-radius: 10px; padding: 11px 16px; cursor: pointer; font-weight: 700; letter-spacing: 0.2px; box-shadow: 0 10px 30px rgba(124,58,237,0.35); transition: transform 120ms ease, box-shadow 120ms ease; }
     button:disabled { opacity: 0.6; cursor: not-allowed; box-shadow: none; }
     button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 12px 32px rgba(34,211,238,0.35); }
+    .file-upload-btn { position: relative; overflow: hidden; display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #f59e0b, #d97706); }
+    .file-upload-btn input[type="file"] { position: absolute; left: 0; top: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .file-name { font-size: 11px; color: var(--muted); margin-left: 8px; max-width: 200px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .info-icon { position: relative; z-index: 10; display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%; background: rgba(255,255,255,0.15); color: #ffffff; font-size: 11px; cursor: pointer; transition: all 0.2s ease; margin-left: 2px; pointer-events: auto; }
+    .info-icon:hover { background: rgba(255,255,255,0.25); transform: scale(1.15); }
     .row { display: flex; gap: 10px; align-items: center; }
     .stack { display: flex; gap: 12px; flex-wrap: wrap; }
     .pill { padding: 6px 12px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; font-size: 12px; color: var(--muted); }
@@ -53,6 +70,8 @@
     .status-light.not-ready { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
     .status-light.checking { background: #f59e0b; }
     @keyframes pulse-green { 0%, 100% { box-shadow: 0 0 8px rgba(34, 197, 94, 0.6); } 50% { box-shadow: 0 0 12px rgba(34, 197, 94, 0.9); } }
+    .theme-toggle { background: var(--panel-2); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 16px; transition: all 0.2s ease; }
+    .theme-toggle:hover { background: var(--border); }
     h2 { margin: 0 0 12px; letter-spacing: 0.3px; }
     h3 { margin: 18px 0 8px; color: var(--accent-2); letter-spacing: 0.2px; }
     label { font-size: 12px; color: var(--muted); margin-bottom: 4px; display: block; }
@@ -77,6 +96,7 @@
     .log-command { color: #22d3ee; }
     .log-error { color: #ef4444; }
     .log-plain { color: var(--text); }
+    :root[data-theme="light"] #log .log-plain { color: #ffffff; }
     .label-user { color: #fbbf24; font-weight: 700; }
     .label-assistant { color: #22c55e; font-weight: 700; }
     .log-sep { border-bottom: 2px dashed #22d3ee; opacity: 0.85; margin: 10px 0 12px; }
@@ -98,6 +118,7 @@
       <div class="pill" id="session">session: new</div>
     </div>
     <div class="header-right">
+      <button class="theme-toggle" id="themeToggle" type="button" title="Toggle theme">🌙</button>
       <div class="pill" id="version">version: ...</div>
     </div>
   </header>
@@ -107,26 +128,39 @@
     <div id="log"></div>
 
     <div class="panel" style="margin-top:16px;">
+      <div class="stack" style="justify-content: center;">
+        <button id="showPrompt" type="button">Show sys-prompt</button>
+        <button id="editPrompt" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">Edit sys-prompt</button>
+        <button class="file-upload-btn" type="button">
+          📎 Upload File
+          <span class="info-icon" id="fileUploadInfo" title="Click for file upload info">ℹ️</span>
+          <input type="file" id="fileUpload" accept="*/*" />
+        </button>
+      </div>
+      <div class="stack" style="justify-content: center; margin-top: 10px;">
+        <button id="showHelp" type="button">/help</button>
+        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
+        <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
+        <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
+        <button id="autoOn" type="button">/auto-on</button>
+        <button id="autoOff" type="button">/auto-off</button>
+      </div>
+      <div style="text-align: center; margin-top: 4px;">
+        <span id="fileName" class="file-name"></span>
+      </div>
+    </div>
+
+    <div class="panel" style="margin-top:16px;">
       <label>Console input (⌘/Ctrl+Enter to send)</label>
       <textarea id="msg" placeholder="Type a message or command for the assistant."></textarea>
       <div class="row" style="margin-top:8px; justify-content: space-between;">
         <div class="row" style="gap:8px;">
           <button id="send">Send</button>
+          <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
           <div id="sendSpinner" class="spinner" aria-hidden="true"></div>
           <span id="quickResponseTime" style="font-size:12px; color:var(--accent-2); font-weight:600; display:none;">⏱️ 0.000s</span>
         </div>
         <span style="font-size:12px; color:var(--muted);">Assistant may choose to run allowed commands.</span>
-      </div>
-    </div>
-
-    <div class="panel" style="margin-top:16px;">
-      <div class="stack">
-        <button id="showPrompt" type="button">Show sys-prompt</button>
-        <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
-        <button id="showHelp" type="button">/help</button>
-        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
-        <button id="autoOn" type="button">/auto-on</button>
-        <button id="autoOff" type="button">/auto-off</button>
       </div>
     </div>
 
@@ -189,9 +223,12 @@
     const msgEl = document.getElementById('msg');
     const sendBtn = document.getElementById('send');
     const promptBtn = document.getElementById('showPrompt');
+    const editPromptBtn = document.getElementById('editPrompt');
     const helpBtn = document.getElementById('showHelp');
     const clearBtn = document.getElementById('clearChat');
     const saveBtn = document.getElementById('saveSession');
+    const loadBtn = document.getElementById('loadSession');
+    const listBtn = document.getElementById('listSessions');
     const autoOnBtn = document.getElementById('autoOn');
     const autoOffBtn = document.getElementById('autoOff');
     const modelEl = document.getElementById('model');
@@ -209,6 +246,10 @@
     const statsToggle = document.getElementById('statsToggle');
     const ollamaStatusLight = document.getElementById('ollamaStatus');
     const ollamaStatusText = document.getElementById('ollamaStatusText');
+    const themeToggle = document.getElementById('themeToggle');
+    const fileUpload = document.getElementById('fileUpload');
+    const fileNameDisplay = document.getElementById('fileName');
+    const fileUploadInfo = document.getElementById('fileUploadInfo');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -219,10 +260,12 @@
     };
     const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
     const STORAGE_KEY = 'owrap_ui_state_v1';
+    const THEME_KEY = 'owrap_theme';
     let sessionId = '';
     let currentStats = { ...emptyStats };
     let restoringState = false;
     let lastResponseTime = null;
+    let pendingFile = null;
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -247,9 +290,142 @@
       if (e.key === 'Escape') closeModal();
     });
     clearBtn.addEventListener('click', clearChat);
-    saveBtn.addEventListener('click', () => sendText('/save'));
+    saveBtn.addEventListener('click', showSaveDialog);
+    loadBtn.addEventListener('click', showLoadDialog);
+    listBtn.addEventListener('click', () => sendText('/sessions'));
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
+    fileUploadInfo.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      showFileUploadInfo();
+    });
+
+    function showFileUploadInfo() {
+      const infoHtml = `
+        <div class="modal-subtitle">One-time file analysis workflow</div>
+        <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">How it works:</div>
+          <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
+            <li>Click "📎 Upload File" and select a file</li>
+            <li>Write a prompt (e.g., "summarize", "find bugs", "explain")</li>
+            <li>Click Send - file content is sent to Ollama with your prompt</li>
+            <li>File is cleared after sending (one-time analysis)</li>
+          </ol>
+        </div>
+        <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
+          <div style="font-weight: 700; margin-bottom: 8px; color: var(--success);">✓ Supported files:</div>
+          <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+            <li><strong>Text files:</strong> .txt, .md, .json, .xml, .csv, .yaml, .yml, .toml, .ini, .conf, .log</li>
+            <li><strong>Code files:</strong> .py, .go, .js, .ts, .java, .c, .cpp, .h, .sh, .html, .css</li>
+          </ul>
+        </div>
+        <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 8px;">
+          <div style="font-weight: 700; margin-bottom: 8px; color: #ef4444;">✗ Not supported:</div>
+          <ul style="margin: 0; padding-left: 20px; line-height: 1.8; color: var(--muted);">
+            <li><strong>Images:</strong> Metadata only (requires vision model + backend support)</li>
+            <li><strong>PDFs:</strong> Metadata only (requires PDF extraction)</li>
+            <li><strong>Binary files:</strong> Metadata only</li>
+          </ul>
+        </div>
+      `;
+      showModal('File Upload Info', infoHtml);
+    }
+
+    async function showEditPromptDialog() {
+      try {
+        const res = await fetch('/api/prompts/list');
+        const data = await res.json();
+        
+        let promptsList = '';
+        if (data.prompts && data.prompts.length > 0) {
+          promptsList = '<div style="margin: 12px 0; max-height: 200px; overflow-y: auto;">';
+          data.prompts.forEach((p, idx) => {
+            const isActive = p === data.current;
+            promptsList += `<div style="padding: 8px; margin: 4px 0; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; ${isActive ? 'border-color: var(--success);' : ''}" class="prompt-option" data-file="${escapeHtml(p)}">`;
+            promptsList += `<div style="font-weight: 600; color: var(--text);">${escapeHtml(p)} ${isActive ? '✓' : ''}</div>`;
+            promptsList += `</div>`;
+          });
+          promptsList += '</div>';
+        }
+        
+        const bodyHtml = `
+          <div class="modal-subtitle">Current: ${escapeHtml(data.current)}</div>
+          
+          <div style="margin-top: 16px;">
+            <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">Select from available prompts:</div>
+            ${promptsList || '<div style="color: var(--muted);">No prompts found in prompts/ directory</div>'}
+          </div>
+          
+          <div style="margin-top: 16px;">
+            <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">Or write a custom prompt:</div>
+            <textarea id="customPromptInput" placeholder="Enter your custom system prompt..." style="min-height: 150px; font-size: 13px;"></textarea>
+          </div>
+          
+          <div style="margin-top: 12px; display: flex; gap: 10px;">
+            <button id="saveCustomPrompt" type="button">Save Custom</button>
+            <button id="cancelPromptEdit" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+          </div>
+        `;
+        
+        showModal('Edit System Prompt', bodyHtml);
+        
+        // Add event listeners
+        document.querySelectorAll('.prompt-option').forEach(el => {
+          el.addEventListener('click', async () => {
+            const file = el.getAttribute('data-file');
+            await updatePrompt('file', file);
+          });
+        });
+        
+        const customInput = document.getElementById('customPromptInput');
+        const saveBtn = document.getElementById('saveCustomPrompt');
+        const cancelBtn = document.getElementById('cancelPromptEdit');
+        
+        saveBtn.addEventListener('click', async () => {
+          const custom = customInput.value.trim();
+          if (!custom) {
+            customInput.style.borderColor = '#ef4444';
+            return;
+          }
+          await updatePrompt('custom', null, custom);
+        });
+        
+        cancelBtn.addEventListener('click', closeModal);
+        
+      } catch (err) {
+        showModal('Error', `<div style="color: #ef4444;">Failed to load prompts: ${escapeHtml(err.message)}</div>`);
+      }
+    }
+
+    async function updatePrompt(source, file, custom) {
+      try {
+        const res = await fetch('/api/prompts/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source, file, custom })
+        });
+        
+        const data = await res.json();
+        
+        if (data.error) {
+          showModal('Error', `<div style="color: #ef4444;">${escapeHtml(data.error)}</div>`);
+          return;
+        }
+        
+        closeModal();
+        
+        // Refresh prompt info
+        await fetchPrompt();
+        
+        appendLine(`✓ System prompt updated to: ${data.name}`, 'assistant');
+        appendSeparator();
+        saveState();
+        
+      } catch (err) {
+        showModal('Error', `<div style="color: #ef4444;">Failed to update prompt: ${escapeHtml(err.message)}</div>`);
+      }
+    }
 
     function saveState() {
       if (restoringState) return;
@@ -298,7 +474,149 @@
       sessionId = '';
       sessionEl.textContent = 'session: new';
       renderStats(emptyStats, true);
+      lastResponseTime = null;
+      if (quickResponseTime) {
+        quickResponseTime.style.display = 'none';
+      }
+      pendingFile = null;
+      fileUpload.value = '';
+      fileNameDisplay.textContent = '';
+      fileNameDisplay.style.color = 'var(--muted)';
+      msgEl.placeholder = 'Type a message or command for the assistant.';
       saveState();
+    }
+
+    function showSaveDialog() {
+      const bodyHtml = `
+        <div class="modal-subtitle">Save your current session to /tmp/sessions</div>
+        <label style="margin-top:12px; display:block;">Session name (optional):</label>
+        <input type="text" id="saveSessionInput" placeholder="Leave empty for auto-generated name (owrap_YYYYMMDD_HHMM.json)" style="margin-top:6px;">
+        <div style="margin-top:12px; display:flex; gap:10px;">
+          <button id="saveSessionConfirm" type="button">Save</button>
+          <button id="saveSessionCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+        </div>
+      `;
+      showModal('Save Session', bodyHtml);
+      
+      const input = document.getElementById('saveSessionInput');
+      const confirmBtn = document.getElementById('saveSessionConfirm');
+      const cancelBtn = document.getElementById('saveSessionCancel');
+      
+      input.focus();
+      
+      const doSave = () => {
+        const name = input.value.trim();
+        const cmd = name ? `/save ${name}` : '/save';
+        closeModal();
+        sendText(cmd);
+      };
+      
+      confirmBtn.addEventListener('click', doSave);
+      cancelBtn.addEventListener('click', closeModal);
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          doSave();
+        }
+      });
+    }
+
+    function showLoadDialog() {
+      // First fetch available sessions
+      fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, message: '/sessions' })
+      })
+      .then(res => res.json())
+      .then(data => {
+        let sessionsList = '';
+        if (data.assistantText && data.assistantText.includes('Saved sessions')) {
+          const lines = data.assistantText.split('\n');
+          const sessions = lines.slice(1).map(l => l.trim()).filter(l => l && l.endsWith('.json'));
+          if (sessions.length > 0) {
+            sessionsList = '<div class="modal-subtitle">Available sessions:</div><div style="background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 10px; margin: 8px 0; max-height: 150px; overflow-y: auto; font-size: 13px;">';
+            sessions.forEach(s => {
+              sessionsList += `<div style="padding: 4px 0; color: var(--accent-2);">• ${escapeHtml(s)}</div>`;
+            });
+            sessionsList += '</div>';
+          } else {
+            sessionsList = '<div style="color: var(--muted); font-size: 13px; margin: 8px 0;">No saved sessions found.</div>';
+          }
+        } else {
+          sessionsList = '<div style="color: var(--muted); font-size: 13px; margin: 8px 0;">No saved sessions found.</div>';
+        }
+        
+        const bodyHtml = `
+          ${sessionsList}
+          <label style="margin-top:12px; display:block;">Session name to load:</label>
+          <input type="text" id="loadSessionInput" placeholder="Enter session name (e.g., mysession.json or mysession)" style="margin-top:6px;">
+          <div style="margin-top:12px; display:flex; gap:10px;">
+            <button id="loadSessionConfirm" type="button">Load</button>
+            <button id="loadSessionCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+          </div>
+        `;
+        showModal('Load Session', bodyHtml);
+        
+        const input = document.getElementById('loadSessionInput');
+        const confirmBtn = document.getElementById('loadSessionConfirm');
+        const cancelBtn = document.getElementById('loadSessionCancel');
+        
+        input.focus();
+        
+        const doLoad = () => {
+          const name = input.value.trim();
+          if (!name) {
+            input.style.borderColor = '#ef4444';
+            return;
+          }
+          closeModal();
+          sendText(`/load ${name}`);
+        };
+        
+        confirmBtn.addEventListener('click', doLoad);
+        cancelBtn.addEventListener('click', closeModal);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            doLoad();
+          }
+        });
+      })
+      .catch(() => {
+        const bodyHtml = `
+          <div style="color: var(--muted); font-size: 13px; margin: 8px 0;">Could not fetch session list.</div>
+          <label style="margin-top:12px; display:block;">Session name to load:</label>
+          <input type="text" id="loadSessionInput" placeholder="Enter session name" style="margin-top:6px;">
+          <div style="margin-top:12px; display:flex; gap:10px;">
+            <button id="loadSessionConfirm" type="button">Load</button>
+            <button id="loadSessionCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+          </div>
+        `;
+        showModal('Load Session', bodyHtml);
+        
+        const input = document.getElementById('loadSessionInput');
+        const confirmBtn = document.getElementById('loadSessionConfirm');
+        const cancelBtn = document.getElementById('loadSessionCancel');
+        
+        input.focus();
+        
+        const doLoad = () => {
+          const name = input.value.trim();
+          if (!name) return;
+          closeModal();
+          sendText(`/load ${name}`);
+        };
+        
+        confirmBtn.addEventListener('click', doLoad);
+        cancelBtn.addEventListener('click', closeModal);
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            doLoad();
+          }
+        });
+      });
     }
 
     async function checkOllamaStatus() {
@@ -356,16 +674,41 @@
     }
 
     async function send() {
-      const text = msgEl.value.trim();
-      if (!text) return;
-      await sendText(text, true);
+      let text = msgEl.value.trim();
+      if (!text && !pendingFile) return;
+      
+      let displayText = text;
+      let apiText = text;
+      
+      if (pendingFile) {
+        const fileInfo = `[File: ${pendingFile.name}, Size: ${(pendingFile.size / 1024).toFixed(1)} KB]`;
+        const userPrompt = text || 'Please analyze this file.';
+        
+        // For display: show only prompt + file info
+        displayText = `${userPrompt} ${fileInfo}`;
+        
+        // For API: send prompt + file info + full content
+        apiText = `${userPrompt}\n\n${fileInfo}\n\n${pendingFile.content}`;
+        
+        // Clear pending file
+        pendingFile = null;
+        fileUpload.value = '';
+        fileNameDisplay.textContent = '';
+        fileNameDisplay.style.color = 'var(--muted)';
+        msgEl.placeholder = 'Type a message or command for the assistant.';
+      }
+      
+      await sendText(apiText, true, displayText);
     }
 
-    async function sendText(text, fromInput = false) {
+    async function sendText(text, fromInput = false, displayText = null) {
       if (!text) return;
+      if (quickResponseTime) {
+        quickResponseTime.style.display = 'none';
+      }
       setSending(true);
       appendSeparator();
-      appendLine(`You: ${text}`, 'user');
+      appendLine(`You: ${displayText || text}`, 'user');
       const startTime = performance.now();
       try {
         const res = await fetch('/api/chat', {
@@ -389,7 +732,29 @@
           const data = await res.json();
           sessionId = data.sessionId;
           sessionEl.textContent = `session: ${sessionId}`;
-          if (data.action === 'run_command') {
+          
+          // Handle session_loaded action - clear log and display all messages
+          if (data.action === 'session_loaded') {
+            logEl.innerHTML = '';
+            appendLine(`✓ ${data.assistantText}`, 'assistant');
+            appendSeparator();
+            
+            // Display all loaded messages
+            for (const msg of data.messages) {
+              if (msg.role === 'system') continue;
+              if (msg.role === 'user') {
+                appendSeparator();
+                appendLine(`You: ${msg.content}`, 'user');
+              } else if (msg.role === 'assistant') {
+                appendLine(`Assistant: ${msg.content}`, 'assistant');
+              }
+            }
+            
+            // Update stats
+            if (data.stats) {
+              renderStats(data.stats);
+            }
+          } else if (data.action === 'run_command') {
             appendLine(`Assistant [Running]: ${data.command}`, 'assistant');
             appendLine('[Command output]:', 'assistant');
             appendLine(data.commandOutput || '(no output)', 'command');
@@ -462,6 +827,25 @@
     function appendSeparator() {
       logEl.insertAdjacentHTML('beforeend', '<div class="log-sep"></div>');
       logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function initTheme() {
+      const savedTheme = localStorage.getItem(THEME_KEY) || 'dark';
+      document.documentElement.setAttribute('data-theme', savedTheme);
+      updateThemeIcon(savedTheme);
+    }
+
+    function updateThemeIcon(theme) {
+      themeToggle.textContent = theme === 'light' ? '🌙' : '☀️';
+      themeToggle.title = theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode';
+    }
+
+    function toggleTheme() {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', newTheme);
+      localStorage.setItem(THEME_KEY, newTheme);
+      updateThemeIcon(newTheme);
     }
 
     function ansiToHtml(text) {
@@ -561,8 +945,62 @@
         .replace(/'/g, '&#39;');
     }
 
+    fileUpload.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      fileNameDisplay.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Ready`;
+      fileNameDisplay.style.color = 'var(--success)';
+      
+      try {
+        const content = await readFileContent(file);
+        pendingFile = {
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          content: content
+        };
+        msgEl.placeholder = `What would you like me to do with ${file.name}?`;
+        msgEl.focus();
+      } catch (err) {
+        appendLine(`Error reading file: ${err.message}`, 'error');
+        fileNameDisplay.textContent = '';
+        fileNameDisplay.style.color = 'var(--muted)';
+        e.target.value = '';
+        pendingFile = null;
+      }
+    });
+
+    async function readFileContent(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        // Check if file is likely binary
+        const textExtensions = ['.txt', '.md', '.json', '.xml', '.csv', '.html', '.css', '.js', '.ts', '.py', '.go', '.java', '.c', '.cpp', '.h', '.sh', '.yaml', '.yml', '.toml', '.ini', '.conf', '.log'];
+        const isLikelyText = textExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
+        
+        if (isLikelyText || file.type.startsWith('text/')) {
+          reader.onload = (e) => resolve(e.target.result);
+          reader.onerror = () => reject(new Error('Failed to read file'));
+          reader.readAsText(file);
+        } else if (file.type.startsWith('image/')) {
+          reader.onload = (e) => {
+            const base64 = e.target.result.split(',')[1];
+            resolve(`[IMAGE DATA - Base64 encoded]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: This is an image file. If using a vision model, the base64 data would be: ${base64.substring(0, 100)}...`);
+          };
+          reader.onerror = () => reject(new Error('Failed to read image'));
+          reader.readAsDataURL(file);
+        } else {
+          // For other binary files, provide metadata
+          resolve(`[BINARY FILE]\nFilename: ${file.name}\nType: ${file.type || 'unknown'}\nSize: ${file.size} bytes\n\nThis appears to be a binary file. Please extract text content or convert to a readable format first.`);
+        }
+      });
+    }
+
     sendBtn.addEventListener('click', send);
     helpBtn.addEventListener('click', fetchHelp);
+    editPromptBtn.addEventListener('click', showEditPromptDialog);
+    themeToggle.addEventListener('click', toggleTheme);
     msgEl.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
         e.preventDefault();
@@ -573,6 +1011,7 @@
       }
     });
 
+    initTheme();
     const restored = loadState();
     fetchPrompt();
     checkOllamaStatus();

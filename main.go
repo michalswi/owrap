@@ -131,12 +131,14 @@ type webCommandResponse struct {
 }
 
 const webHelpText = `Web UI commands:
-/auto-on     Enable automatic analysis after commands
-/auto-off    Disable automatic analysis after commands
-/save        Save current web session to /tmp as JSON
-/last        Show last prompt and assistant reply
-/stats       Show live session stats (also visible in UI)
-/allowedcomm Show the allowlisted shell commands
+/auto-on       Enable automatic analysis after commands
+/auto-off      Disable automatic analysis after commands
+/save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
+/load NAME     Load a saved session by name
+/sessions      List all saved sessions in /tmp/sessions
+/last          Show last prompt and assistant reply
+/stats         Show live session stats (also visible in UI)
+/allowedcomm   Show the allowlisted shell commands
 `
 
 type Session struct {
@@ -479,6 +481,8 @@ func startWebUI(bindAddr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat", handleWebChat)
 	mux.HandleFunc("/api/prompt", handleWebPrompt)
+	mux.HandleFunc("/api/prompts/list", handleListPrompts)
+	mux.HandleFunc("/api/prompts/update", handleUpdatePrompt)
 	mux.HandleFunc("/api/help", handleWebHelp)
 	mux.HandleFunc("/api/command", handleWebCommand)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -513,6 +517,81 @@ func handleWebPrompt(w http.ResponseWriter, _ *http.Request) {
 		"name":    systemPromptName,
 		"model":   modelName,
 		"version": version,
+	})
+}
+
+func handleListPrompts(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	promptsDir := "prompts"
+	var prompts []string
+
+	files, err := os.ReadDir(promptsDir)
+	if err == nil {
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".txt") {
+				prompts = append(prompts, file.Name())
+			}
+		}
+	}
+
+	sort.Strings(prompts)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"prompts": prompts,
+		"current": systemPromptName,
+	})
+}
+
+type UpdatePromptRequest struct {
+	Source string `json:"source"` // "file" or "custom"
+	File   string `json:"file"`   // filename if source=file
+	Custom string `json:"custom"` // custom text if source=custom
+}
+
+func handleUpdatePrompt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req UpdatePromptRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return
+	}
+
+	var newPrompt string
+	var newName string
+
+	if req.Source == "file" {
+		filePath := filepath.Join("prompts", req.File)
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read prompt file"})
+			return
+		}
+		newPrompt = string(data)
+		newName = req.File
+	} else if req.Source == "custom" {
+		newPrompt = strings.TrimSpace(req.Custom)
+		if newPrompt == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Custom prompt cannot be empty"})
+			return
+		}
+		newName = "custom"
+	} else {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid source"})
+		return
+	}
+
+	systemPrompt = newPrompt
+	systemPromptName = newName
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"success": "Prompt updated successfully",
+		"name":    systemPromptName,
 	})
 }
 
@@ -666,24 +745,6 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			Stats:         sess.Stats,
 		})
 		return
-	case "/save":
-		path, err := saveWebSession(sess)
-		text := "Session saved."
-		if err != nil {
-			text = fmt.Sprintf("Save failed: %v", err)
-		} else if path != "" {
-			text = fmt.Sprintf("Session saved to %s", path)
-		}
-		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:     sess.ID,
-			Action:        "answer",
-			AssistantText: text,
-			Messages:      sess.Messages,
-			Model:         modelName,
-			Timestamp:     time.Now().UTC(),
-			Stats:         sess.Stats,
-		})
-		return
 	case "/stats", "/s":
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,
@@ -706,6 +767,107 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			Stats:         sess.Stats,
 		})
 		return
+	default:
+		// Check for /save with optional name
+		if strings.HasPrefix(lower, "/save") {
+			parts := strings.Fields(req.Message)
+			var sessionName string
+			if len(parts) > 1 {
+				sessionName = parts[1]
+			}
+			session := Session{
+				Timestamp:    time.Now().UTC().Format(time.RFC3339),
+				Model:        modelName,
+				Messages:     sess.Messages,
+				Stats:        sess.Stats,
+				CachedBlocks: nil,
+			}
+			path, err := saveSessionToFile(session, sessionName)
+			text := "Session saved."
+			if err != nil {
+				text = fmt.Sprintf("Save failed: %v", err)
+			} else if path != "" {
+				text = fmt.Sprintf("Session saved to %s", path)
+			}
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "answer",
+				AssistantText: text,
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+		// Check for /load <name>
+		if strings.HasPrefix(lower, "/load") {
+			parts := strings.Fields(req.Message)
+			if len(parts) < 2 {
+				writeJSON(w, http.StatusOK, webChatResponse{
+					SessionID:     sess.ID,
+					Action:        "answer",
+					AssistantText: "Usage: /load <session-name>",
+					Messages:      sess.Messages,
+					Model:         modelName,
+					Timestamp:     time.Now().UTC(),
+					Stats:         sess.Stats,
+				})
+				return
+			}
+			sessionName := parts[1]
+			loadedSession, err := loadSessionFromFile(sessionName)
+			if err != nil {
+				writeJSON(w, http.StatusOK, webChatResponse{
+					SessionID:     sess.ID,
+					Action:        "answer",
+					AssistantText: fmt.Sprintf("Load failed: %v", err),
+					Messages:      sess.Messages,
+					Model:         modelName,
+					Timestamp:     time.Now().UTC(),
+					Stats:         sess.Stats,
+				})
+				return
+			}
+			// Restore session data
+			sess.Messages = loadedSession.Messages
+			sess.Stats = loadedSession.Stats
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "session_loaded",
+				AssistantText: fmt.Sprintf("Session '%s' loaded successfully. Messages: %d user, %d assistant. You can continue from here.", sessionName, loadedSession.Stats.UserMessages, loadedSession.Stats.AssistantMessages),
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+		// Check for /sessions or /list
+		if lower == "/sessions" || lower == "/list" {
+			sessions, err := listSessions()
+			text := ""
+			if err != nil {
+				text = fmt.Sprintf("Failed to list sessions: %v", err)
+			} else if len(sessions) == 0 {
+				text = "No saved sessions found in /tmp/sessions"
+			} else {
+				text = fmt.Sprintf("Saved sessions (%d):\n", len(sessions))
+				for _, name := range sessions {
+					text += fmt.Sprintf("  %s\n", name)
+				}
+			}
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "answer",
+				AssistantText: text,
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
 	}
 	sess.Stats.recordUser(req.Message)
 	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: req.Message})
@@ -923,18 +1085,76 @@ func buildSession(model string, stats *Stats) Session {
 	}
 }
 
-// saveSessionToFile saves the provided Session as a timestamped JSON file in /tmp.
-func saveSessionToFile(session Session) error {
-	timestamp := time.Now().UTC().Format("20060102_1504")
-	filename := filepath.Join("/tmp", fmt.Sprintf("owrap_%s.json", timestamp))
+// saveSessionToFile saves the provided Session as a named JSON file in /tmp/sessions.
+func saveSessionToFile(session Session, name string) (string, error) {
+	sessionsDir := "/tmp/sessions"
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create sessions directory: %w", err)
+	}
+
+	var filename string
+	if name == "" {
+		// Auto-generate name with timestamp
+		timestamp := time.Now().UTC().Format("20060102_1504")
+		filename = filepath.Join(sessionsDir, fmt.Sprintf("owrap_%s.json", timestamp))
+	} else {
+		// Use provided name
+		if !strings.HasSuffix(name, ".json") {
+			name = name + ".json"
+		}
+		filename = filepath.Join(sessionsDir, name)
+	}
+
 	data, err := json.MarshalIndent(session, "", "  ")
 	if err != nil {
-		return fmt.Errorf("failed to marshal session: %w", err)
+		return "", fmt.Errorf("failed to marshal session: %w", err)
 	}
 	if err := os.WriteFile(filename, data, 0644); err != nil {
-		return fmt.Errorf("failed to write session to %s: %w", filename, err)
+		return "", fmt.Errorf("failed to write session to %s: %w", filename, err)
 	}
-	return nil
+	return filename, nil
+}
+
+// loadSessionFromFile loads a session from /tmp/sessions by name.
+func loadSessionFromFile(name string) (*Session, error) {
+	sessionsDir := "/tmp/sessions"
+	if !strings.HasSuffix(name, ".json") {
+		name = name + ".json"
+	}
+	filename := filepath.Join(sessionsDir, name)
+
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read session from %s: %w", filename, err)
+	}
+
+	var session Session
+	if err := json.Unmarshal(data, &session); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal session: %w", err)
+	}
+
+	return &session, nil
+}
+
+// listSessions returns a list of saved session files in /tmp/sessions.
+func listSessions() ([]string, error) {
+	sessionsDir := "/tmp/sessions"
+	entries, err := os.ReadDir(sessionsDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("failed to read sessions directory: %w", err)
+	}
+
+	var sessions []string
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".json") {
+			sessions = append(sessions, entry.Name())
+		}
+	}
+	sort.Strings(sessions)
+	return sessions, nil
 }
 
 func saveWebSession(sess *webSession) (string, error) {
@@ -1107,8 +1327,16 @@ func main() {
 				}
 				continue
 			} else {
+				beforeLoadLen := len(sessionMessages)
 				handled := handleSlashCommand(userInput, stats)
 				if handled {
+					// Check if session was loaded (sessionMessages changed significantly)
+					if len(sessionMessages) != beforeLoadLen && len(sessionMessages) > 0 {
+						// Rebuild messages array from loaded session
+						messages = []ChatMessage{{Role: "system", Content: systemPrompt}}
+						messages = append(messages, sessionMessages...)
+						fmt.Println(info("Conversation context restored - you can continue from here."))
+					}
 					continue
 				}
 				// Fall through if unknown slash command; let model handle text
@@ -1145,6 +1373,7 @@ func main() {
 			// Model didn’t stick to JSON; just print raw
 			fmt.Println(assistantLabel(), raw)
 			messages = append(messages, ChatMessage{Role: "assistant", Content: raw})
+			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: raw})
 			continue
 		}
 
@@ -1209,6 +1438,7 @@ func main() {
 		default:
 			fmt.Println("Assistant (unknown action):", raw)
 			messages = append(messages, ChatMessage{Role: "assistant", Content: raw})
+			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: raw})
 		}
 	}
 }

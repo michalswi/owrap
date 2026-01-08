@@ -11,17 +11,20 @@
 [![security](https://img.shields.io/badge/For-whatever-8B0000.svg?style=for-the-badge)](#)
 [![ai](https://img.shields.io/badge/AI-Powered-cyan.svg?style=for-the-badge)](#)
 
+![img](./img/owrapui.png)
 
 </div>
 
-**owrap** is local Go CLI (+ webUI) wrapper around Ollama that:
+**owrap** is a local Go-based CLI and web UI wrapper around Ollama that:
 
-- sends your text to the Ollama HTTP chat endpoint with the configured model
-- when asked, runs [allowlisted](./comm.go#L3) shell commands locally, captures stdout/stderr, and feeds that output back as a chat message so the model can continue
-- maintains a session log (user/assistant messages, stats) in memory; you can save it to tmp with /save
-- provides slash commands for help, stats, cached blocks, exec file, etc.
-- app works either in terminal or in webui
-- all interaction stays on your machine
+- Works in both terminal and web UI modes
+- Keeps all interactions local on your machine (no external API calls)
+- Sends your messages to the Ollama HTTP chat endpoint with your configured model
+- Executes [allowlisted](./comm.go#L3) shell commands when explicitly requested by the model, captures stdout/stderr, and feeds the output back to continue the conversation
+- Maintains session logs (user/assistant messages, statistics) in memory with `/save` and `/load` support for `/tmp/sessions`
+- Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
+- Supports **file uploads** in web UI - upload text/code files for one-time analysis with custom prompts
+- Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button)
 
 
 ## Help
@@ -35,33 +38,37 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.3.2 - @michalswi
+	v0.4.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
 ------------------------------------------------------------
 You: /h
 Available commands:
-  /h            Show this help
-  /q            Exit the program
-  /dir          Show current working directory
-  /m            Show Ollama LLM model in use
-  /up           Show app uptime
-  /s, /stats    Show session stats (counts, chars, last command)
-  /last         Show last prompt + model answer
-  /sysprompt    Show current system prompt
-  /save         Save current session to /tmp as JSON (includes cached blocks)
-  /p [DELIM]    Paste multi-line input; finish with a line containing only DELIM (default EOF)
-  /cache        List cached (not sent) blocks
-  /use N        Send cached block #N (1-based) with optional question
-  /auto-on      Enable automatic analysis after commands
-  /auto-off     [default] Disable automatic analysis after commands
-  /execfile P   Execute each non-empty line in file P (no analysis)
+  /h             Show this help
+  /q             Exit the program
+  /dir           Show current working directory
+  /m             Show Ollama LLM model in use
+  /up            Show app uptime
+  /s, /stats     Show session stats (counts, chars, last command)
+  /last          Show last prompt + model answer
+  /sysprompt     Show current system prompt
+  /editsysprompt Edit system prompt (select from files or write custom)
+  /save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
+  /load NAME     Load a saved session by name
+  /sessions      List all saved sessions in /tmp/sessions
+  /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)
+  /cache         List cached (not sent) blocks
+  /use N         Send cached block #N (1-based) with optional question
+  /auto-on       Enable automatic analysis after commands
+  /auto-off      [default] Disable automatic analysis after commands
+  /execfile P    Execute each non-empty line in file P (no analysis)
 Model-run allowed commands:
-  [arp, cat, chmod, curl, dig, echo, ffuf, find, for, grep, head, httpx, ls, nc, netcat, nmap, nslookup, ping, pwd, sort, subfinder, tail, telnet, traceroute, uniq, wc, wget, while, whois]
+  [ansible, arp, bash, cat, chmod, curl, date, dig, echo, ffuf, find, for, grep, head, httpx, ip, ls, nc, netcat, nmap, nslookup, ping, pwd, sh, sort, subfinder, tail, telnet, terraform, traceroute, tree, uniq, wc, wget, while, whois]
 ------------------------------------------------------------
 
-> [webui version] described below 
+
+> [webui version] (described below)
 $ ./owrap -h
 Usage of ./owrap:
   -web
@@ -83,14 +90,22 @@ gemma3:4b             a2af6cc3eb7f    3.3 GB    5 days ago
 llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 ```
 
-- default **URL** to connect to Ollama is `http://localhost:11434/api/chat`. It might be changed using env var `OLLAMA_URL`  
-- default **local LLM model** is `gemma3:4b`. It might be changed using env var `OLLAMA_MODEL`
-- default **system prompt** is defined [here](./vars.go). By default the built-in prompt is used; set env var `SYSTEM_PROMPT` to a prompt file path (e.g., [prompts/recon.txt](./prompts/recon.txt)) to load it instead (falls back to default if the file cannot be read)
-- default **port** for webUI is `8080`. It might be changed using env var `WEB_BIND`
+- **URL** to connect to Ollama: `http://localhost:11434/api/chat` (override with env var `OLLAMA_URL`)
+- **LLM model**: `gemma3:4b` (override with env var `OLLAMA_MODEL`)
+- **System prompt**: Defined [here](./vars.go) by default. You can:
+  - Set `SYSTEM_PROMPT` env var to a prompt file path (e.g., `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt`) to load at startup
+  - Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI) to change it at runtime
+  - Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI) to display the current one
+  - Falls back to default if the file cannot be read
+  - Find more about available prompts [here](#-system-prompts)
+- **Web UI port**: `:8080` (override with env var `WEB_BIND`)
 
 ### > run app [terminal version]
 
 ```
+$ you might use predefined system prompts from ./prompts,
+include 'prompts' dir in the same folder where 'owrap' app
+
 $ ./owrap
 
  ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
@@ -99,7 +114,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.3.2 - @michalswi
+	v0.4.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -118,7 +133,7 @@ $ SYSTEM_PROMPT=./prompts/(...).txt ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.3.2 - @michalswi
+	v0.4.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -128,14 +143,11 @@ You:
 
 ### > run app [webui version]
 ```
+$ you might use predefined system prompts from ./prompts,
+include 'prompts' dir in the same folder where 'owrap' app
+
 $ ./owrap -web
 2025/12/28 16:19:44 web UI listening on :8080 (model=gemma3:4b, prompt=default, chars=481)
-
-OR
-
-$ SYSTEM_PROMPT=./prompts/(...).txt ./owrap -web
-(...)
-
 
 $ open in web browser http://localhost:8080/
 ```
@@ -156,7 +168,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.3.2 - @michalswi
+	v0.4.0 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -251,6 +263,27 @@ Analysis:
 (...)
 ------------------------------------------------------------
 ```
+
+## \# System Prompts
+
+The system prompt defines the assistant's behavior and capabilities. The default prompt is defined [here](./vars.go).
+
+**Predefined prompts** available in `./prompts/`:
+- `apps_developer.txt` - Application development assistant
+- `cloud_engineer.txt` - Cloud infrastructure and DevOps helper
+- `japanese_teacher.txt` - Japanese language learning assistant
+- `local_network_recon.txt` - Local network reconnaissance guide
+- `web_recon.txt` - General web (OWASP based) reconnaissance assistant
+- `shell_command_assistant.txt` - Shell command helper and executor
+- `prompt_engineer.txt` - System prompts creation assistant
+
+**How to use**:
+- **At startup**: `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt ./owrap`
+- **At runtime**: Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI)
+- **View current**: Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI)
+
+**Creating custom prompts**: Create a `.txt` file in the `./prompts/` directory with your instructions. The prompt should define the assistant's role, capabilities, and response format 
+
 
 ## \# Disclaimer
 
