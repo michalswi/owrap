@@ -24,7 +24,7 @@
 - Maintains session logs (user/assistant messages, statistics) in memory with `/save` and `/load` support for `/tmp/sessions`
 - Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
 - Supports **file uploads** in web UI - upload text/code files for one-time analysis with custom prompts
-- Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: "Edit sys-prompt" button)
+- Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button)
 
 
 ## Help
