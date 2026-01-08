@@ -130,6 +130,7 @@
     <div class="panel" style="margin-top:16px;">
       <div class="stack">
         <button id="showPrompt" type="button">Show sys-prompt</button>
+        <button id="editPrompt" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">Edit sys-prompt</button>
         <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
         <button id="showHelp" type="button">/help</button>
         <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
@@ -218,6 +219,7 @@
     const msgEl = document.getElementById('msg');
     const sendBtn = document.getElementById('send');
     const promptBtn = document.getElementById('showPrompt');
+    const editPromptBtn = document.getElementById('editPrompt');
     const helpBtn = document.getElementById('showHelp');
     const clearBtn = document.getElementById('clearChat');
     const saveBtn = document.getElementById('saveSession');
@@ -324,6 +326,101 @@
         </div>
       `;
       showModal('File Upload Info', infoHtml);
+    }
+
+    async function showEditPromptDialog() {
+      try {
+        const res = await fetch('/api/prompts/list');
+        const data = await res.json();
+        
+        let promptsList = '';
+        if (data.prompts && data.prompts.length > 0) {
+          promptsList = '<div style="margin: 12px 0; max-height: 200px; overflow-y: auto;">';
+          data.prompts.forEach((p, idx) => {
+            const isActive = p === data.current;
+            promptsList += `<div style="padding: 8px; margin: 4px 0; background: var(--panel); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; ${isActive ? 'border-color: var(--success);' : ''}" class="prompt-option" data-file="${escapeHtml(p)}">`;
+            promptsList += `<div style="font-weight: 600; color: var(--text);">${escapeHtml(p)} ${isActive ? '✓' : ''}</div>`;
+            promptsList += `</div>`;
+          });
+          promptsList += '</div>';
+        }
+        
+        const bodyHtml = `
+          <div class="modal-subtitle">Current: ${escapeHtml(data.current)}</div>
+          
+          <div style="margin-top: 16px;">
+            <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">Select from available prompts:</div>
+            ${promptsList || '<div style="color: var(--muted);">No prompts found in prompts/ directory</div>'}
+          </div>
+          
+          <div style="margin-top: 16px;">
+            <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">Or write a custom prompt:</div>
+            <textarea id="customPromptInput" placeholder="Enter your custom system prompt..." style="min-height: 150px; font-size: 13px;"></textarea>
+          </div>
+          
+          <div style="margin-top: 12px; display: flex; gap: 10px;">
+            <button id="saveCustomPrompt" type="button">Save Custom</button>
+            <button id="cancelPromptEdit" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+          </div>
+        `;
+        
+        showModal('Edit System Prompt', bodyHtml);
+        
+        // Add event listeners
+        document.querySelectorAll('.prompt-option').forEach(el => {
+          el.addEventListener('click', async () => {
+            const file = el.getAttribute('data-file');
+            await updatePrompt('file', file);
+          });
+        });
+        
+        const customInput = document.getElementById('customPromptInput');
+        const saveBtn = document.getElementById('saveCustomPrompt');
+        const cancelBtn = document.getElementById('cancelPromptEdit');
+        
+        saveBtn.addEventListener('click', async () => {
+          const custom = customInput.value.trim();
+          if (!custom) {
+            customInput.style.borderColor = '#ef4444';
+            return;
+          }
+          await updatePrompt('custom', null, custom);
+        });
+        
+        cancelBtn.addEventListener('click', closeModal);
+        
+      } catch (err) {
+        showModal('Error', `<div style="color: #ef4444;">Failed to load prompts: ${escapeHtml(err.message)}</div>`);
+      }
+    }
+
+    async function updatePrompt(source, file, custom) {
+      try {
+        const res = await fetch('/api/prompts/update', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source, file, custom })
+        });
+        
+        const data = await res.json();
+        
+        if (data.error) {
+          showModal('Error', `<div style="color: #ef4444;">${escapeHtml(data.error)}</div>`);
+          return;
+        }
+        
+        closeModal();
+        
+        // Refresh prompt info
+        await fetchPrompt();
+        
+        appendLine(`✓ System prompt updated to: ${data.name}`, 'assistant');
+        appendSeparator();
+        saveState();
+        
+      } catch (err) {
+        showModal('Error', `<div style="color: #ef4444;">Failed to update prompt: ${escapeHtml(err.message)}</div>`);
+      }
     }
 
     function saveState() {
@@ -898,6 +995,7 @@
 
     sendBtn.addEventListener('click', send);
     helpBtn.addEventListener('click', fetchHelp);
+    editPromptBtn.addEventListener('click', showEditPromptDialog);
     themeToggle.addEventListener('click', toggleTheme);
     msgEl.addEventListener('keydown', (e) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {

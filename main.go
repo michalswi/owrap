@@ -481,6 +481,8 @@ func startWebUI(bindAddr string) error {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat", handleWebChat)
 	mux.HandleFunc("/api/prompt", handleWebPrompt)
+	mux.HandleFunc("/api/prompts/list", handleListPrompts)
+	mux.HandleFunc("/api/prompts/update", handleUpdatePrompt)
 	mux.HandleFunc("/api/help", handleWebHelp)
 	mux.HandleFunc("/api/command", handleWebCommand)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
@@ -515,6 +517,81 @@ func handleWebPrompt(w http.ResponseWriter, _ *http.Request) {
 		"name":    systemPromptName,
 		"model":   modelName,
 		"version": version,
+	})
+}
+
+func handleListPrompts(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	promptsDir := "prompts"
+	var prompts []string
+
+	files, err := os.ReadDir(promptsDir)
+	if err == nil {
+		for _, file := range files {
+			if !file.IsDir() && strings.HasSuffix(file.Name(), ".txt") {
+				prompts = append(prompts, file.Name())
+			}
+		}
+	}
+
+	sort.Strings(prompts)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"prompts": prompts,
+		"current": systemPromptName,
+	})
+}
+
+type UpdatePromptRequest struct {
+	Source string `json:"source"` // "file" or "custom"
+	File   string `json:"file"`   // filename if source=file
+	Custom string `json:"custom"` // custom text if source=custom
+}
+
+func handleUpdatePrompt(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	var req UpdatePromptRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid request"})
+		return
+	}
+
+	var newPrompt string
+	var newName string
+
+	if req.Source == "file" {
+		filePath := filepath.Join("prompts", req.File)
+		data, err := os.ReadFile(filePath)
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "Failed to read prompt file"})
+			return
+		}
+		newPrompt = string(data)
+		newName = req.File
+	} else if req.Source == "custom" {
+		newPrompt = strings.TrimSpace(req.Custom)
+		if newPrompt == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Custom prompt cannot be empty"})
+			return
+		}
+		newName = "custom"
+	} else {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "Invalid source"})
+		return
+	}
+
+	systemPrompt = newPrompt
+	systemPromptName = newName
+
+	writeJSON(w, http.StatusOK, map[string]string{
+		"success": "Prompt updated successfully",
+		"name":    systemPromptName,
 	})
 }
 
