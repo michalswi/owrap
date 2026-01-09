@@ -179,6 +179,8 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 
 ### > run docker
 
+Docker image is available for both architectures/platforms `linux/amd64` and `linux/arm64`.
+
 ```
 $ docker run -d --rm \
 --name owrap \
