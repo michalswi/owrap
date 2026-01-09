@@ -11,7 +11,7 @@ DOCKER_REPO := michalsw
 PORT := 8080
 
 .DEFAULT_GOAL := help
-.PHONY: build-mac build-linux go-build docker-build-arm docker-build-linux
+.PHONY: build-mac build-linux go-build docker-build
 
 help:
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n\nTargets:\n"} /^[a-zA-Z_-]+:.*?##/ \
@@ -36,25 +36,15 @@ go-build: ## Build binary
 	-ldflags "-s -w -X 'main.Version=$(APP_VERSION)'" \
 	-o $(APP_NAME)-${APP_VERSION}
 
-docker-build-arm: ## Build arm docker image
-	docker build \
+docker-build: ## Build linux and arm docker images
+	docker buildx build \
+	--platform linux/amd64,linux/arm64 \
 	--pull \
 	--build-arg GOLANG_VERSION="$(GOLANG_VERSION)" \
 	--build-arg ALPINE_VERSION="$(ALPINE_VERSION)" \
 	--build-arg APP_NAME="$(APP_NAME)" \
 	--build-arg APP_VERSION="$(APP_VERSION)" \
 	--label="build.version=$(APP_VERSION)" \
-	--tag="$(DOCKER_REPO)/$(APP_NAME):latest" \
-	.
-
-docker-build-linux: ## Build linux docker image
-	docker build \
-	--pull \
-	--build-arg GOLANG_VERSION="$(GOLANG_VERSION)" \
-	--build-arg ALPINE_VERSION="$(ALPINE_VERSION)" \
-	--build-arg APP_NAME="$(APP_NAME)" \
-	--build-arg APP_VERSION="$(APP_VERSION)" \
-	--label="build.version=$(APP_VERSION)" \
-	--platform linux/amd64 \
-	--tag="$(DOCKER_REPO)/$(APP_NAME):latest" \
+	--tag "$(DOCKER_REPO)/$(APP_NAME):latest" \
+	--push \
 	.
