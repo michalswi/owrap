@@ -181,9 +181,12 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 
 Docker image is available for both architectures/platforms `linux/amd64` and `linux/arm64`.
 
+Allowed commands to use in owrap are [here](./comm.go). **NOT** all of them are included in docker image.
+
 ```
 $ docker run -d --rm \
 --name owrap \
+--pull always \
 -e OLLAMA_URL="http://<ollama_host_ip>:11434/api/chat" \
 -p 8080:8080 \
 michalsw/owrap:latest
