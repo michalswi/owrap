@@ -26,6 +26,8 @@
 - Supports **file uploads** in web UI - upload text/code files for one-time analysis with custom prompts
 - Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button)
 
+**owrap** is available in two modes (*terminal* and *web UI*) and as a Docker image: `michalsw/owrap:latest` (all descriptions below).
+
 
 ## Help
 
