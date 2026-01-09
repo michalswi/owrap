@@ -84,6 +84,8 @@ App requires that Ollama is up and running, e.g.
 $ ollama serve
 (...)
 
+$ ollama pull gemma3:4b
+
 $ ollama ls
 NAME                  ID              SIZE      MODIFIED
 gemma3:4b             a2af6cc3eb7f    3.3 GB    5 days ago
@@ -165,6 +167,8 @@ App requires that Ollama is up and running, e.g.
 $ OLLAMA_HOST=0.0.0.0 ollama serve
 (...)
 
+$ ollama pull gemma3:4b
+
 $ ollama ls
 NAME                  ID              SIZE      MODIFIED
 gemma3:4b             a2af6cc3eb7f    3.3 GB    5 days ago
@@ -176,7 +180,7 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 ```
 $ docker run -d --rm \
 --name owrap \
--e OLLAMA_URL="http://<your_ip>:11434/api/chat" \
+-e OLLAMA_URL="http://<ollama_host_ip>:11434/api/chat" \
 -p 8080:8080 \
 michalsw/owrap:latest
 
@@ -316,6 +320,6 @@ Analysis:
 
 ## \# Disclaimer
 
-Important: Read This Before Using
+**Important**: Read This Before Using
 
 This tool is designed for educational purposes. Not for malicious or illegal activities. Users are solely responsible for how they use this tool. The developers are not liable for any misuse or damage caused.
