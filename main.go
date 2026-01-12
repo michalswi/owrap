@@ -130,17 +130,6 @@ type webCommandResponse struct {
 	Timestamp time.Time `json:"timestamp"`
 }
 
-const webHelpText = `Web UI commands:
-/auto-on       Enable automatic analysis after commands
-/auto-off      Disable automatic analysis after commands
-/save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
-/load NAME     Load a saved session by name
-/sessions      List all saved sessions in /tmp/sessions
-/last          Show last prompt and assistant reply
-/stats         Show live session stats (also visible in UI)
-/allowedcomm   Show the allowlisted shell commands
-`
-
 type Session struct {
 	Timestamp    string        `json:"timestamp"`
 	Model        string        `json:"model"`

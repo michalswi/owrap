@@ -142,12 +142,14 @@
         </button>
       </div>
       <div class="stack" style="justify-content: center; margin-top: 10px;">
-        <button id="showHelp" type="button">/help</button>
-        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/save</button>
-        <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
-        <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
+        <button id="showHelp" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/help</button>
+        <button id="showMyPrompts" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">/myprompts</button>
         <button id="autoOn" type="button">/auto-on</button>
         <button id="autoOff" type="button">/auto-off</button>
+        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/save</button>
+        <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
+        <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
+        <button id="showLast" type="button">/last</button>
       </div>
       <div style="text-align: center; margin-top: 4px;">
         <span id="fileName" class="file-name"></span>
@@ -229,6 +231,8 @@
     const promptBtn = document.getElementById('showPrompt');
     const editPromptBtn = document.getElementById('editPrompt');
     const helpBtn = document.getElementById('showHelp');
+    const myPromptsBtn = document.getElementById('showMyPrompts');
+    const lastBtn = document.getElementById('showLast');
     const clearBtn = document.getElementById('clearChat');
     const saveBtn = document.getElementById('saveSession');
     const loadBtn = document.getElementById('loadSession');
@@ -297,6 +301,8 @@
     saveBtn.addEventListener('click', showSaveDialog);
     loadBtn.addEventListener('click', showLoadDialog);
     listBtn.addEventListener('click', () => sendText('/sessions'));
+    lastBtn.addEventListener('click', () => sendText('/last'));
+    myPromptsBtn.addEventListener('click', showMyPrompts);
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
     fileUploadInfo.addEventListener('click', (e) => {
@@ -304,6 +310,56 @@
       e.preventDefault();
       showFileUploadInfo();
     });
+
+    function showMyPrompts() {
+      // Extract all user messages from the log
+      const logLines = logEl.querySelectorAll('.log-line');
+      const userPrompts = [];
+      
+      logLines.forEach(line => {
+        const userLabel = line.querySelector('.label-user');
+        if (userLabel) {
+          // Extract text after "You: "
+          const fullText = line.textContent;
+          const promptText = fullText.replace(/^You:\s*/, '').trim();
+          if (promptText) {
+            userPrompts.push(promptText);
+          }
+        }
+      });
+      
+      let promptsHtml = '';
+      if (userPrompts.length === 0) {
+        promptsHtml = '<div style="color: var(--muted); font-size: 13px; margin: 8px 0;">No prompts in current session yet.</div>';
+      } else {
+        promptsHtml = `<div class="modal-subtitle">Total: ${userPrompts.length} prompt(s) - Click to reuse</div>`;
+        promptsHtml += '<div style="background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin: 8px 0; max-height: 400px; overflow-y: auto;">';
+        userPrompts.forEach((prompt, idx) => {
+          const escapedPrompt = escapeHtml(prompt);
+          const dataPrompt = prompt.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+          promptsHtml += `<div class="reuse-prompt" data-prompt="${dataPrompt}" style="margin-bottom: 12px; padding: 8px 12px; ${idx < userPrompts.length - 1 ? 'border-bottom: 1px solid var(--border);' : ''} cursor: pointer; border-radius: 6px; transition: background 0.2s;" onmouseover="this.style.background='var(--border)'" onmouseout="this.style.background='transparent'">`;
+          promptsHtml += `<div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">#${idx + 1} - Click to reuse</div>`;
+          promptsHtml += `<div style="color: var(--text); font-size: 13px; line-height: 1.6;">${escapedPrompt}</div>`;
+          promptsHtml += `</div>`;
+        });
+        promptsHtml += '</div>';
+        promptsHtml += '<div style="color: var(--muted); font-size: 12px; margin-top: 8px;">💡 These prompts are preserved when you save/load sessions.</div>';
+      }
+      
+      showModal('My Prompts (Current Session)', promptsHtml);
+      
+      // Add click handlers to reuse prompts
+      setTimeout(() => {
+        document.querySelectorAll('.reuse-prompt').forEach(el => {
+          el.addEventListener('click', () => {
+            const promptText = el.getAttribute('data-prompt');
+            msgEl.value = promptText;
+            closeModal();
+            msgEl.focus();
+          });
+        });
+      }, 100);
+    }
 
     function showFileUploadInfo() {
       const infoHtml = `
