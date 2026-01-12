@@ -54,6 +54,7 @@ Available commands:
   /up            Show app uptime
   /s, /stats     Show session stats (counts, chars, last command)
   /last          Show last prompt + model answer
+  /myprompts     Show all your prompts from current session
   /sysprompt     Show current system prompt
   /editsysprompt Edit system prompt (select from files or write custom)
   /save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
@@ -62,11 +63,11 @@ Available commands:
   /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)
   /cache         List cached (not sent) blocks
   /use N         Send cached block #N (1-based) with optional question
-  /auto-on       Enable automatic analysis after commands
-  /auto-off      [default] Disable automatic analysis after commands
+  /auto-on       LLM auto-analyzes command output after execution
+  /auto-off      [default] No LLM auto-analysis after command execution
   /execfile P    Execute each non-empty line in file P (no analysis)
 Model-run allowed commands:
-  [ansible, arp, bash, cat, chmod, curl, date, dig, echo, ffuf, find, for, grep, head, httpx, ip, ls, nc, netcat, nmap, nslookup, ping, pwd, sh, sort, subfinder, tail, telnet, terraform, traceroute, tree, uniq, wc, wget, while, whois]
+  [ansible, arp, cat, chmod, curl, date, df, dig, echo, ffuf, find, for, grep, head, httpx, ip, jq, ls, nc, netcat, nmap, nslookup, openssl, ping, pwd, sh, sort, subfinder, tail, telnet, terraform, traceroute, tree, uniq, uptime, wc, wget, while, whois, xargs]
 ------------------------------------------------------------
 
 
