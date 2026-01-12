@@ -40,7 +40,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.4.0 - @michalswi
+	v0.4.1 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -119,7 +119,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.4.0 - @michalswi
+	v0.4.1 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -138,7 +138,7 @@ $ SYSTEM_PROMPT=./prompts/(...).txt ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.4.0 - @michalswi
+	v0.4.1 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -214,6 +214,7 @@ The system prompt defines the assistant's behavior and capabilities. The default
 - **At startup**: `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt ./owrap`
 - **At runtime**: Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI)
 - **View current**: Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI)
+- **Review your prompts**: Use `/myprompts` (terminal) or `/myprompts` button (web UI) to see all your prompts from the current session. In web UI, click any prompt to reuse it. They might be saved (/save) and restored (/load) when restoring the session.
 
 **Creating custom prompts**: Create a `.txt` file in the `./prompts/` directory with your instructions. The prompt should define the assistant's role, capabilities, and response format
 
@@ -230,7 +231,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.4.0 - @michalswi
+	v0.4.1 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
