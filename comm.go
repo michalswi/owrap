@@ -34,6 +34,8 @@ var allowedCommands = map[string]bool{
 	"jq":         true,
 	"df":         true,
 	"uptime":     true,
+	"openssl":    true,
+	"xargs":      true,
 	// the following commands are not available
 	// in owrap's docker image:
 	"ffuf":      true,

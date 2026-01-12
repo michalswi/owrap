@@ -48,7 +48,8 @@ iputils-ping \
 nmap \
 netcat-openbsd \
 jq \
-busybox-extras
+busybox-extras \
+openssl
 
 RUN adduser -D -h /app app
 USER app
