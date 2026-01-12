@@ -7,9 +7,6 @@ var allowedCommands = map[string]bool{
 	"curl":       true,
 	"ping":       true,
 	"nmap":       true,
-	"ffuf":       true,
-	"subfinder":  true,
-	"httpx":      true,
 	"while":      true,
 	"echo":       true,
 	"for":        true,
@@ -32,9 +29,14 @@ var allowedCommands = map[string]bool{
 	"nc":         true,
 	"date":       true,
 	"tree":       true,
-	"terraform":  true,
-	"ansible":    true,
-	"bash":       true,
 	"sh":         true,
 	"ip":         true,
+	"jq":         true,
+	// the following commands are not available
+	// in owrap's docker image:
+	"ffuf":      true,
+	"subfinder": true,
+	"httpx":     true,
+	"terraform": true,
+	"ansible":   true,
 }
