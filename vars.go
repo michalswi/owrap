@@ -10,7 +10,7 @@ const (
 	separator = "------------------------------------------------------------"
 )
 
-var version = "v0.4.0"
+var version = "v0.4.1"
 
 var defaultSystemPrompt = `
 You are a helpful, general-purpose assistant.
@@ -35,3 +35,15 @@ var sessionMessages []ChatMessage
 var cachedBlocks []string
 var autoAnalyze bool
 var startTime time.Time
+
+const webHelpText = `Web UI commands:
+/myprompts     Show all your prompts from current session (click to reuse)
+/auto-on       Enable automatic analysis after commands
+/auto-off      Disable automatic analysis after commands
+/save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
+/load NAME     Load a saved session by name
+/sessions      List all saved sessions in /tmp/sessions
+/last          Show last prompt and assistant reply
+/stats         Show live session stats (also visible in UI)
+/allowedcomm   Show the allowlisted shell commands
+`

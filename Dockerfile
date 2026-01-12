@@ -41,7 +41,15 @@ ENV WEB_BIND ""
 
 # root to install packages
 USER root
-RUN apk --no-cache add bind-tools curl
+RUN apk --no-cache add \
+bind-tools \
+curl \
+iputils-ping \
+nmap \
+netcat-openbsd \
+jq \
+busybox-extras \
+openssl
 
 RUN adduser -D -h /app app
 USER app

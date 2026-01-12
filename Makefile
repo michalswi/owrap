@@ -2,7 +2,7 @@ GOLANG_VERSION := 1.25.5
 ALPINE_VERSION := 3.23
 
 APP_NAME := owrap
-APP_VERSION := 0.4.0
+APP_VERSION := 0.4.1
 # + vars.go + README.md
 
 GIT_REPO := github.com/michalswi/owrap

@@ -102,6 +102,9 @@ func handleSlashCommand(input string, stats *Stats) bool {
 	case "/editsysprompt":
 		handleEditSystemPrompt()
 		return true
+	case "/myprompts":
+		printMyPrompts()
+		return true
 	default:
 		fmt.Printf("%s %s\n", warn("Unknown command:"), input)
 		return true
@@ -117,6 +120,7 @@ func printHelp() {
 	fmt.Println("  /up            Show app uptime")
 	fmt.Println("  /s, /stats     Show session stats (counts, chars, last command)")
 	fmt.Println("  /last          Show last prompt + model answer")
+	fmt.Println("  /myprompts     Show all your prompts from current session")
 	fmt.Println("  /sysprompt     Show current system prompt")
 	fmt.Println("  /editsysprompt Edit system prompt (select from files or write custom)")
 	fmt.Println("  /save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)")
@@ -125,8 +129,8 @@ func printHelp() {
 	fmt.Println("  /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)")
 	fmt.Println("  /cache         List cached (not sent) blocks")
 	fmt.Println("  /use N         Send cached block #N (1-based) with optional question")
-	fmt.Println("  /auto-on       Enable automatic analysis after commands")
-	fmt.Println("  /auto-off      [default] Disable automatic analysis after commands")
+	fmt.Println("  /auto-on       LLM auto-analyzes command output after execution")
+	fmt.Println("  /auto-off      [default] No LLM auto-analysis after command execution")
 	fmt.Println("  /execfile P    Execute each non-empty line in file P (no analysis)")
 	fmt.Println(accent("Model-run allowed commands:"))
 	fmt.Printf("  [%s]\n", strings.Join(allowedCommandsList(), ", "))
@@ -260,4 +264,35 @@ func handleEditSystemPrompt() {
 	}
 
 	fmt.Println(warn("Invalid choice"))
+}
+
+func printMyPrompts() {
+	// Extract all user messages from sessionMessages
+	userPrompts := []string{}
+	for _, msg := range sessionMessages {
+		if msg.Role == "user" {
+			userPrompts = append(userPrompts, msg.Content)
+		}
+	}
+
+	if len(userPrompts) == 0 {
+		fmt.Println(info("No prompts in current session yet."))
+		return
+	}
+
+	fmt.Println(separatorLine())
+	fmt.Println(accent(fmt.Sprintf("My Prompts (Total: %d)", len(userPrompts))))
+	fmt.Println(separatorLine())
+
+	for i, prompt := range userPrompts {
+		fmt.Printf("\n%s\n", info(fmt.Sprintf("#%d:", i+1)))
+		fmt.Println(prompt)
+		if i < len(userPrompts)-1 {
+			fmt.Println("")
+		}
+	}
+
+	fmt.Println("")
+	fmt.Println(separatorLine())
+	fmt.Println(info("💡 These prompts are preserved when you save/load sessions."))
 }
