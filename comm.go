@@ -37,6 +37,11 @@ var allowedCommands = map[string]bool{
 	"openssl":    true,
 	"xargs":      true,
 	"host":       true,
+	"cut":        true,
+	"sed":        true,
+	"awk":        true,
+	"mkdir":      true,
+	"touch":      true,
 	// the following commands are not available
 	// in owrap's docker image:
 	"ffuf":      true,

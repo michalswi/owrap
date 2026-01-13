@@ -298,6 +298,7 @@
     let restoringState = false;
     let lastResponseTime = null;
     let pendingFile = null;
+    let lastUserMessage = ''; // Track last user message for UI feedback
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -795,6 +796,10 @@
       setSending(true);
       appendSeparator();
       appendLine(`You: ${displayText || text}`, 'user');
+      
+      // Track last user message for UI feedback
+      lastUserMessage = text;
+      
       const startTime = performance.now();
       try {
         const res = await fetch('/api/chat', {
@@ -852,7 +857,21 @@
               appendLine('⚠️  Command failed, but agent will learn and try a different approach...', 'plain');
             }
             
+            // Display summary if present (autonomous mode generates summaries with 📝 emoji)
             if (data.assistantText) {
+              // Check for summary marker
+              const summaryMarker = '📝';
+              if (data.assistantText.includes(summaryMarker)) {
+                // Extract and display summary
+                const parts = data.assistantText.split('\n\n');
+                for (const part of parts) {
+                  if (part.includes(summaryMarker)) {
+                    appendLine(part, 'assistant');
+                  }
+                }
+              }
+              
+              // Check for analysis marker (non-autonomous mode)
               const marker = '\n\nAnalysis:\n';
               const idx = data.assistantText.indexOf(marker);
               if (idx !== -1) {
@@ -864,9 +883,21 @@
               }
             }
           }
-          if (data.assistantText && data.action !== 'run_command') {
+          
+          // Display update_findings action
+          if (data.action === 'update_findings' && data.assistantText) {
+            appendLine(data.assistantText, 'assistant');
+          } else if (data.assistantText && data.action !== 'run_command') {
             appendLine(`Assistant: ${data.assistantText}`, 'assistant');
           }
+          
+          // Show command count in autonomous mode
+          if (data.autonomousMode && data.commandCount) {
+            const isReview = data.commandCount % 3 === 0;
+            const countMsg = `📊 Commands executed: ${data.commandCount}${isReview ? ' (Goal review triggered)' : ''}`;
+            appendLine(countMsg, 'plain');
+          }
+          
           if (lastResponseTime) {
             appendLine(`⏱️  Response time: ${lastResponseTime}s`, 'plain');
           }
@@ -909,7 +940,13 @@
                 sendText('STOP TALKING. Execute the command NOW. Respond with {"action":"run_command","command":"..."}');
               }, 1500);
             } else {
-              appendLine('🔄 Continuing autonomous loop...', 'plain');
+              // Show different message based on goal review cycle
+              const userMessage = lastUserMessage.toLowerCase();
+              if (userMessage.includes('goal review') || userMessage.includes('🎯')) {
+                appendLine('🎯 Goal review in progress...', 'plain');
+              } else {
+                appendLine('🔄 Continuing autonomous loop...', 'plain');
+              }
               setTimeout(() => {
                 sendText('next step');
               }, 1500);

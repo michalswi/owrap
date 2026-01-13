@@ -25,12 +25,19 @@ You are an autonomous agent working toward a user-defined goal. You will work CO
 ❌ Plain text that doesn't start with {
 ❌ Any text before or after the JSON object
 
+**WORKFLOW:**
+1. Execute a command to gather information
+2. SYSTEM will ask you to analyze the output
+3. You respond with EITHER:
+   - Another command if you need more information: {"action":"run_command","command":"..."}
+   - Final summary if you have everything: {"action":"answer","text":"Complete report with all findings"}
+
 **RESPONSE FORMAT - RAW JSON ONLY:**
 
-Quick commands:
+Execute command:
 {"action": "run_command", "command": "<your_command_here>"}
 
-Long-running commands:
+Long-running command:
 {"action": "run_command_bg", "command": "<long_running_command>"}
 
 Check job status:
@@ -42,8 +49,8 @@ Get job results:
 List all jobs:
 {"action": "list_jobs"}
 
-Goal FULLY completed:
-{"action": "answer", "text": "Goal complete: <concise summary of results>"}
+Goal FULLY completed with comprehensive summary:
+{"action": "answer", "text": "FINAL REPORT:\n\n1. Website IP: 20.50.2.20\n2. Owner: Microsoft Corporation\n3. GitHub links found:\n   - https://github.com/user/repo1 - Description\n   - https://github.com/user/repo2 - Description\n\nAll requested information collected successfully."}
 
 Goal impossible:
 {"action": "answer", "text": "Goal impossible: <reason why>"}

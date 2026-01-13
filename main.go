@@ -41,6 +41,8 @@ type webSession struct {
 	OriginalPrompt     string
 	OriginalPromptName string
 	RetryCount         int
+	CommandCount       int    // Tracks commands executed in autonomous mode
+	PartialFindings    string // Stores completed parts of the goal to avoid re-running
 }
 
 type webSessionStore struct {
@@ -159,6 +161,7 @@ type ChatRequest struct {
 	Model    string        `json:"model"`
 	Messages []ChatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
+	Format   string        `json:"format,omitempty"` // "json" to force JSON output
 }
 
 type ChatResponse struct {
@@ -166,9 +169,9 @@ type ChatResponse struct {
 }
 
 type ToolResponse struct {
-	Action  string `json:"action"`            // "run_command", "answer", "run_command_bg", "check_job", "get_job", "cancel_job", "list_jobs"
+	Action  string `json:"action"`            // "run_command", "answer", "update_findings", "run_command_bg", "check_job", "get_job", "cancel_job", "list_jobs"
 	Command string `json:"command,omitempty"` // when action == run_command or run_command_bg
-	Text    string `json:"text,omitempty"`    // when action == answer
+	Text    string `json:"text,omitempty"`    // when action == answer or update_findings
 	JobID   string `json:"jobId,omitempty"`   // for job-related actions
 }
 
@@ -190,6 +193,7 @@ type webChatResponse struct {
 	Stats              Stats            `json:"stats"`
 	AutonomousMode     bool             `json:"autonomousMode,omitempty"`
 	AutonomousContinue bool             `json:"autonomousContinue,omitempty"`
+	CommandCount       int              `json:"commandCount,omitempty"` // Commands executed in autonomous mode
 	JobID              string           `json:"jobId,omitempty"`
 	JobStatus          string           `json:"jobStatus,omitempty"`
 	Jobs               []*BackgroundJob `json:"jobs,omitempty"`
@@ -246,11 +250,14 @@ func allowedCommandsList() []string {
 	return keys
 }
 
-func callOllama(messages []ChatMessage) (string, error) {
+func callOllama(messages []ChatMessage, forceJSON bool) (string, error) {
 	reqBody := ChatRequest{
 		Model:    modelName,
 		Messages: messages,
 		Stream:   false,
+	}
+	if forceJSON {
+		reqBody.Format = "json"
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(reqBody); err != nil {
@@ -270,16 +277,43 @@ func callOllama(messages []ChatMessage) (string, error) {
 	return cr.Message.Content, nil
 }
 
-func callOllamaWithLog(origin string, messages []ChatMessage) (string, error) {
+func callOllamaWithLog(origin string, messages []ChatMessage, forceJSON bool) (string, error) {
 	start := time.Now()
-	resp, err := callOllama(messages)
+	resp, err := callOllama(messages, forceJSON)
 	dur := time.Since(start)
-	log.Printf("[ollama][%s] messages=%d model=%s dur=%s err=%v", origin, len(messages), modelName, dur.Round(time.Millisecond), err)
+	jsonMode := ""
+	if forceJSON {
+		jsonMode = " json-mode=true"
+	}
+	log.Printf("[ollama][%s] messages=%d model=%s%s dur=%s err=%v", origin, len(messages), modelName, jsonMode, dur.Round(time.Millisecond), err)
 	return resp, err
 }
 
 func runCommand(cmdStr string) string {
 	sanitized := sanitizeCommand(cmdStr)
+
+	// If command contains &&, ||, or complex shell syntax, run through bash -c
+	if strings.Contains(sanitized, "&&") || strings.Contains(sanitized, "||") ||
+		strings.Contains(sanitized, ";") {
+		cmd := exec.Command("bash", "-c", sanitized)
+		var outBuf, errBuf bytes.Buffer
+		cmd.Stdout = &outBuf
+		cmd.Stderr = &errBuf
+
+		err := cmd.Run()
+		out := outBuf.String()
+		if errBuf.Len() > 0 {
+			out += "\n[stderr]\n" + errBuf.String()
+		}
+		if err != nil && strings.TrimSpace(out) == "" {
+			return fmt.Sprintf("Error running command: %v\nstderr: %s", err, errBuf.String())
+		}
+		if strings.TrimSpace(out) == "" {
+			return "(no output)"
+		}
+		return out
+	}
+
 	// If multiple lines, execute sequentially and aggregate
 	if strings.Contains(sanitized, "\n") {
 		var parts []string
@@ -1164,7 +1198,9 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	messages = append(messages, ChatMessage{Role: "system", Content: systemPrompt})
 	messages = append(messages, sess.Messages...)
 
-	raw, err := callOllamaWithLog("web-chat:"+sess.ID, messages)
+	// Force JSON mode only in autonomous mode
+	forceJSON := sess.AutonomousMode
+	raw, err := callOllamaWithLog("web-chat:"+sess.ID, messages, forceJSON)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("ollama error: %v", err), http.StatusBadGateway)
 		return
@@ -1309,12 +1345,106 @@ Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePrevi
 		messageContent := "✓ Result:\n" + out
 		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
 
+		// In autonomous mode: increment counter and generate summary
+		if sess.AutonomousMode {
+			sess.CommandCount++
+
+			// Generate a quick summary for UI display (even for errors)
+			summaryPrompt := `Provide a ONE sentence summary of this output. If it's an error, explain what failed. If it's data, explain what was found. Keep it under 100 characters.`
+
+			summaryMessages := []ChatMessage{
+				{Role: "system", Content: "You are a helpful assistant that summarizes command outputs concisely."},
+				{Role: "assistant", Content: messageContent},
+				{Role: "user", Content: summaryPrompt},
+			}
+
+			quickSummary, err := callOllamaWithLog("quick-summary:"+sess.ID, summaryMessages, false)
+			if err != nil {
+				// If summary generation fails, provide a basic one
+				if strings.Contains(out, "Error") || strings.Contains(out, "error") {
+					quickSummary = "⚠️ Command failed with error"
+				} else {
+					quickSummary = "✓ Command completed"
+				}
+			}
+			quickSummary = strings.TrimSpace(quickSummary)
+			if len(quickSummary) > 500 {
+				quickSummary = quickSummary[:497] + "..."
+			}
+
+			// Add summary to conversation so model sees it
+			summaryNote := "📝 " + quickSummary
+			sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: summaryNote})
+
+			// Every 3 commands, force detailed goal review. Otherwise, simple continue.
+			var analysisPrompt string
+			if sess.CommandCount%3 == 0 {
+				// Detailed goal review every 3 commands
+				history := buildIterationHistory(sess)
+
+				partialSection := ""
+				if sess.PartialFindings != "" {
+					partialSection = fmt.Sprintf("\n✅ ALREADY FOUND (do NOT search again):\n%s\n", sess.PartialFindings)
+				}
+
+				analysisPrompt = fmt.Sprintf(`🎯 GOAL REVIEW (after %d commands):
+
+Your goal: %s%s
+Recent work:
+%s
+
+CRITICAL DECISION:
+1. Review the last 6 commands and their outputs above
+2. Check what you've ALREADY FOUND (marked ✅ above)
+3. Do you have ALL information needed to complete the goal?
+   - For "Find IP and owner": Need both IP address AND owner/organization name
+   - For "Find GitHub links": Need actual repository URLs with descriptions
+   - For "Make report": Need to compile all findings into structured format
+
+4. If you completed a PART of the goal, update findings:
+   {"action":"update_findings","text":"IP: X.X.X.X, Owner: CompanyName"}
+   Then continue: {"action":"run_command","command":"<next task>"}
+
+5. If you have ALL required information:
+   {"action":"answer","text":"<comprehensive report with: IP, owner, all GitHub links with descriptions>"}
+
+6. If information is INCOMPLETE:
+   {"action":"run_command","command":"<specific command to get missing data>"}
+
+Do NOT re-run commands for data you already found (✅ section). Focus ONLY on missing parts.`, sess.CommandCount, sess.AutonomousGoal, partialSection, history)
+			} else {
+				// Simple continuation - just keep working
+				analysisPrompt = `Continue working toward the goal. What's your next command?
+
+{"action":"run_command","command":"<next_command>"}`
+			}
+
+			sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: analysisPrompt})
+
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:          sess.ID,
+				Action:             "run_command",
+				AssistantText:      messageContent + "\n\n" + summaryNote,
+				Command:            tool.Command,
+				CommandOutput:      out,
+				Messages:           sess.Messages,
+				Model:              modelName,
+				Timestamp:          time.Now().UTC(),
+				Stats:              sess.Stats,
+				AutonomousMode:     sess.AutonomousMode,
+				AutonomousContinue: true, // Always continue to get analysis
+				CommandCount:       sess.CommandCount,
+			})
+			return
+		}
+
+		// Non-autonomous mode: optional auto-analysis
 		combined := messageContent
 		if autoAnalyze {
 			analysisPrompt := "Analyze the command output above and summarize key points. Do not request or run additional commands."
 			analysisMessages := append(messages, ChatMessage{Role: "assistant", Content: messageContent})
 			analysisMessages = append(analysisMessages, ChatMessage{Role: "user", Content: analysisPrompt})
-			analysisRaw, err := callOllamaWithLog("web-chat-analysis:"+sess.ID, analysisMessages)
+			analysisRaw, err := callOllamaWithLog("web-chat-analysis:"+sess.ID, analysisMessages, false)
 			if err == nil {
 				analysisClean := strings.TrimSpace(analysisRaw)
 				if strings.HasPrefix(analysisClean, "```") {
@@ -1338,20 +1468,16 @@ Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePrevi
 			}
 		}
 
-		autoContinue := sess.AutonomousMode
-
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:          sess.ID,
-			Action:             "run_command",
-			AssistantText:      combined,
-			Command:            tool.Command,
-			CommandOutput:      out,
-			Messages:           sess.Messages,
-			Model:              modelName,
-			Timestamp:          time.Now().UTC(),
-			Stats:              sess.Stats,
-			AutonomousMode:     sess.AutonomousMode,
-			AutonomousContinue: autoContinue,
+			SessionID:     sess.ID,
+			Action:        "run_command",
+			AssistantText: combined,
+			Command:       tool.Command,
+			CommandOutput: out,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
 		})
 
 	case "run_command_bg":
@@ -1558,36 +1684,52 @@ Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePrevi
 			AutonomousContinue: sess.AutonomousMode,
 		})
 
-	case "answer":
-		sess.Stats.recordAssistant(tool.Text)
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: tool.Text})
-
-		// In autonomous mode, answer means either completion or the agent is confused
-		// Only stop if it explicitly says the goal is achieved/impossible
-		autoContinue := false
-		if sess.AutonomousMode {
-			lowerText := strings.ToLower(tool.Text)
-			if strings.Contains(lowerText, "goal achieved") ||
-				strings.Contains(lowerText, "goal completed") ||
-				strings.Contains(lowerText, "impossible") ||
-				strings.Contains(lowerText, "cannot be achieved") {
-				autoContinue = false
+	case "update_findings":
+		// Store partial findings to avoid re-running commands
+		if tool.Text != "" {
+			if sess.PartialFindings == "" {
+				sess.PartialFindings = tool.Text
 			} else {
-				// Agent is just talking instead of executing - force it to continue
-				autoContinue = true
+				sess.PartialFindings += "\n" + tool.Text
 			}
+			log.Printf("[AUTONOMOUS] Updated findings for session %s: %s", sess.ID, tool.Text)
 		}
 
+		// Continue autonomous mode
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:          sess.ID,
-			Action:             "answer",
-			AssistantText:      tool.Text,
+			Action:             "update_findings",
+			AssistantText:      "✅ Saved: " + tool.Text,
 			Messages:           sess.Messages,
 			Model:              modelName,
 			Timestamp:          time.Now().UTC(),
 			Stats:              sess.Stats,
 			AutonomousMode:     sess.AutonomousMode,
-			AutonomousContinue: autoContinue,
+			AutonomousContinue: true,
+			CommandCount:       sess.CommandCount,
+		})
+
+	case "answer":
+		sess.Stats.recordAssistant(tool.Text)
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: tool.Text})
+
+		// In autonomous mode, "answer" action means goal complete - stop autonomous mode
+		if sess.AutonomousMode {
+			sess.AutonomousMode = false
+			systemPrompt = sess.OriginalPrompt
+			systemPromptName = sess.OriginalPromptName
+			sess.PartialFindings = "" // Clear findings when done
+			log.Printf("[AUTONOMOUS] Goal completed with final summary, stopping autonomous mode")
+		}
+
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: tool.Text,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
 		})
 	default:
 		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
@@ -1976,7 +2118,7 @@ func main() {
 		sessionMessages = append(sessionMessages, ChatMessage{Role: "user", Content: userInput})
 		stats.recordUser(userInput)
 
-		raw, err := callOllama(messages)
+		raw, err := callOllama(messages, false)
 		if err != nil {
 			fmt.Println(warn("Ollama error:"), err)
 			continue
@@ -2019,7 +2161,7 @@ func main() {
 				// Ask for analysis without running more commands
 				analysisPrompt := "Analyze the command output above and summarize key points. Do not request or run additional commands."
 				analysisMessages := append(messages, ChatMessage{Role: "user", Content: analysisPrompt})
-				analysisRaw, err := callOllama(analysisMessages)
+				analysisRaw, err := callOllama(analysisMessages, false)
 				if err != nil {
 					fmt.Println(warn("Ollama error during analysis:"), err)
 					continue
@@ -2040,13 +2182,12 @@ func main() {
 					fmt.Println(analysisLabel(), analysisRaw)
 					messages = append(messages, ChatMessage{Role: "assistant", Content: analysisRaw})
 					sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: analysisRaw})
-					continue
+				} else {
+					fmt.Println(analysisLabel(), analysis.Text)
+					stats.recordAssistant(analysis.Text)
+					messages = append(messages, ChatMessage{Role: "assistant", Content: analysis.Text})
+					sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: analysis.Text})
 				}
-
-				fmt.Println(analysisLabel(), analysis.Text)
-				stats.recordAssistant(analysis.Text)
-				messages = append(messages, ChatMessage{Role: "assistant", Content: analysis.Text})
-				sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: analysis.Text})
 			}
 
 		case "answer":
