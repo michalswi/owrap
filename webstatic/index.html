@@ -125,6 +125,22 @@
   <main>
     <!-- <h2>owrapUI</h2> -->
 
+    <!-- Autonomous Mode Goal Display -->
+    <div id="autonomousGoalBanner" style="display: none; margin-bottom: 12px; padding: 12px 16px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(219, 39, 119, 0.15)); border: 2px solid rgba(236, 72, 153, 0.4); border-radius: 12px;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+        <span style="font-size: 20px;">🤖</span>
+        <div style="flex: 1;">
+          <div style="font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 4px;">AUTONOMOUS MODE ACTIVE</div>
+          <div style="font-size: 13px; color: var(--text);"><strong>Goal:</strong> <span id="autonomousGoalText">-</span></div>
+        </div>
+      </div>
+      <!-- Active Jobs Display -->
+      <div id="activeJobsContainer" style="display: none; margin-top: 8px; padding: 8px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--accent-2); margin-bottom: 4px;">Background Jobs:</div>
+        <div id="activeJobsList" style="font-size: 11px; color: var(--muted);"></div>
+      </div>
+    </div>
+
     <div style="margin-bottom: 12px; padding: 10px 14px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px; font-size: 13px; color: var(--muted);">
       ℹ️ <strong>Note:</strong> Sessions are not saved by default. Use the <strong>/save</strong> button to save your current session.
     </div>
@@ -146,6 +162,8 @@
         <button id="showMyPrompts" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">/myprompts</button>
         <button id="autoOn" type="button">/auto-on</button>
         <button id="autoOff" type="button">/auto-off</button>
+        <button id="autonomousStart" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🤖 /autostart</button>
+        <button id="autonomousStop" type="button" style="background: linear-gradient(135deg, #64748b, #475569); display: none;">⏹️ /autostop</button>
         <button id="saveSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/save</button>
         <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
         <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
@@ -239,6 +257,8 @@
     const listBtn = document.getElementById('listSessions');
     const autoOnBtn = document.getElementById('autoOn');
     const autoOffBtn = document.getElementById('autoOff');
+    const autonomousStartBtn = document.getElementById('autonomousStart');
+    const autonomousStopBtn = document.getElementById('autonomousStop');
     const modelEl = document.getElementById('model');
     const promptEl = document.getElementById('prompt');
     const versionEl = document.getElementById('version');
@@ -258,6 +278,10 @@
     const fileUpload = document.getElementById('fileUpload');
     const fileNameDisplay = document.getElementById('fileName');
     const fileUploadInfo = document.getElementById('fileUploadInfo');
+    const autonomousGoalBanner = document.getElementById('autonomousGoalBanner');
+    const autonomousGoalText = document.getElementById('autonomousGoalText');
+    const activeJobsContainer = document.getElementById('activeJobsContainer');
+    const activeJobsList = document.getElementById('activeJobsList');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -305,6 +329,8 @@
     myPromptsBtn.addEventListener('click', showMyPrompts);
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
+    autonomousStartBtn.addEventListener('click', showAutonomousStartDialog);
+    autonomousStopBtn.addEventListener('click', stopAutonomousMode);
     fileUploadInfo.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -790,6 +816,7 @@
           appendLine(`Error: ${res.status}`, 'error');
         } else {
           const data = await res.json();
+          console.log('Response data:', data); // Debug log
           sessionId = data.sessionId;
           sessionEl.textContent = `session: ${sessionId}`;
           
@@ -817,7 +844,14 @@
           } else if (data.action === 'run_command') {
             appendLine(`Assistant [Running]: ${data.command}`, 'assistant');
             appendLine('[Command output]:', 'assistant');
-            appendLine(data.commandOutput || '(no output)', 'command');
+            const output = data.commandOutput || '(no output)';
+            appendLine(output, 'command');
+            
+            // Detect errors and show helpful message in autonomous mode
+            if (data.autonomousMode && (output.includes('Error running command') || output.includes('stderr:') || output.includes('exit status'))) {
+              appendLine('⚠️  Command failed, but agent will learn and try a different approach...', 'plain');
+            }
+            
             if (data.assistantText) {
               const marker = '\n\nAnalysis:\n';
               const idx = data.assistantText.indexOf(marker);
@@ -836,9 +870,53 @@
           if (lastResponseTime) {
             appendLine(`⏱️  Response time: ${lastResponseTime}s`, 'plain');
           }
+          
+          // Update background jobs display
+          if (data.jobs && data.jobs.length > 0) {
+            activeJobsContainer.style.display = 'block';
+            let jobsHtml = '';
+            data.jobs.forEach(job => {
+              const status = job.Status === 'running' 
+                ? `⏳ running (${Math.round((Date.now() - new Date(job.StartTime)) / 1000)}s)`
+                : job.Status === 'completed' ? '✅ completed' : '❌ ' + job.Status;
+              jobsHtml += `<div>${job.ID}: ${job.Command} [${status}]</div>`;
+            });
+            activeJobsList.innerHTML = jobsHtml;
+          } else if (data.jobId) {
+            // Single job from run_command_bg or check_job
+            activeJobsContainer.style.display = 'block';
+            const status = data.jobStatus === 'running' ? '⏳ running' : data.jobStatus;
+            activeJobsList.innerHTML = `<div>${data.jobId}: ${data.command || 'job'} [${status}]</div>`;
+          }
+          
           modelEl.textContent = `model: ${data.model}`;
           if (data.stats) {
             renderStats(data.stats);
+          }
+          
+          // Auto-continue autonomous loop
+          if (data.autonomousContinue) {
+            appendSeparator();
+            if (data.action === 'error') {
+              // Error message already includes retry count from backend
+              appendLine(data.assistantText, 'error');
+              setTimeout(() => {
+                sendText('retry'); // Trigger retry with error feedback already in messages
+              }, 1500);
+            } else if (data.action === 'answer') {
+              appendLine('⚠️  Agent is explaining instead of executing. Forcing next iteration...', 'plain');
+              setTimeout(() => {
+                sendText('STOP TALKING. Execute the command NOW. Respond with {"action":"run_command","command":"..."}');
+              }, 1500);
+            } else {
+              appendLine('🔄 Continuing autonomous loop...', 'plain');
+              setTimeout(() => {
+                sendText('next step');
+              }, 1500);
+            }
+          } else if (data.autonomousMode && !data.autonomousContinue) {
+            appendSeparator();
+            appendLine('🏁 Autonomous loop complete (max iterations reached or goal achieved)', 'plain');
           }
         }
       } catch (e) {
@@ -994,6 +1072,140 @@
     function rgbToHex(r, g, b) {
       const toHex = v => v.toString(16).padStart(2, '0');
       return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+
+    function showAutonomousStartDialog() {
+      const bodyHtml = `
+        <div class="modal-subtitle">Define your goal - the agent will work continuously until it's done</div>
+        
+        <div style="margin-top: 16px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">Goal:</label>
+          <textarea id="autoGoalInput" placeholder="Example: Find the IP and owner of https://example.com. Look for all GitHub links on the page. Make a report with IP, owner info, and list of GitHub links." style="min-height: 120px; font-size: 13px;"></textarea>
+        </div>
+        
+        <div style="margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; font-size: 12px; color: var(--muted);">
+          ⚠️ <strong>Autonomous Mode:</strong> The agent will work CONTINUOUSLY until the goal is fully achieved or proven impossible. It can run background jobs and work in parallel. Use /autostop to stop.
+        </div>
+        
+        <div style="margin-top: 16px; display: flex; gap: 10px;">
+          <button id="startAutonomousConfirm" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🚀 Start Autonomous Work</button>
+          <button id="startAutonomousCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+        </div>
+      `;
+      
+      showModal('🤖 Start Autonomous Mode', bodyHtml);
+      
+      const goalInput = document.getElementById('autoGoalInput');
+      const confirmBtn = document.getElementById('startAutonomousConfirm');
+      const cancelBtn = document.getElementById('startAutonomousCancel');
+      
+      goalInput.focus();
+      
+      const doStart = async () => {
+        const goal = goalInput.value.trim();
+        
+        if (!goal) {
+          goalInput.style.borderColor = '#ef4444';
+          return;
+        }
+        
+        closeModal();
+        await startAutonomousMode(goal);
+      };
+      
+      confirmBtn.addEventListener('click', doStart);
+      cancelBtn.addEventListener('click', closeModal);
+      
+      goalInput.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          doStart();
+        }
+      });
+    }
+
+    async function startAutonomousMode(goal) {
+      try {
+        const res = await fetch('/api/autonomous/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            sessionId, 
+            goal
+          })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+          appendLine(`❌ Failed to start autonomous mode: ${data.error || 'Unknown error'}`, 'error');
+          return;
+        }
+        
+        // CRITICAL: Update sessionId to match the one from autonomous start
+        sessionId = data.sessionId;
+        sessionEl.textContent = `session: ${sessionId}`;
+        console.log('Autonomous mode started with sessionId:', sessionId);
+        
+        // Update UI
+        autonomousStartBtn.style.display = 'none';
+        autonomousStopBtn.style.display = 'inline-flex';
+        promptEl.textContent = 'sys-prompt: autonomous_agent.txt';
+        
+        // Show and update autonomous goal banner
+        autonomousGoalBanner.style.display = 'block';
+        autonomousGoalText.textContent = goal;
+        
+        appendSeparator();
+        appendLine('🤖 Autonomous mode ACTIVATED', 'assistant');
+        appendLine(`Goal: ${goal}`, 'assistant');
+        appendSeparator();
+        appendLine('💡 Starting autonomous work...', 'assistant');
+        appendSeparator();
+        saveState();
+        
+        // Automatically start the first iteration
+        setTimeout(() => {
+          sendText('start working on the goal');
+        }, 1000);
+        
+      } catch (err) {
+        appendLine(`❌ Error starting autonomous mode: ${err.message}`, 'error');
+      }
+    }
+
+    async function stopAutonomousMode() {
+      try {
+        const res = await fetch('/api/autonomous/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+          appendLine(`❌ Failed to stop autonomous mode: ${data.error || 'Unknown error'}`, 'error');
+          return;
+        }
+        
+        // Update UI
+        autonomousStartBtn.style.display = 'inline-flex';
+        autonomousStopBtn.style.display = 'none';
+        autonomousGoalBanner.style.display = 'none';
+        
+        appendSeparator();
+        appendLine('⏹️ Autonomous mode STOPPED', 'assistant');
+        appendLine(`System prompt restored to: ${data.prompt}`, 'assistant');
+        appendSeparator();
+        
+        // Refresh prompt info
+        await fetchPrompt();
+        saveState();
+        
+      } catch (err) {
+        appendLine(`❌ Error stopping autonomous mode: ${err.message}`, 'error');
+      }
     }
 
     function escapeHtml(str) {

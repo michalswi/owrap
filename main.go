@@ -32,10 +32,15 @@ type ChatMessage struct {
 var webStatic embed.FS
 
 type webSession struct {
-	ID        string
-	Messages  []ChatMessage
-	CreatedAt time.Time
-	Stats     Stats
+	ID                 string
+	Messages           []ChatMessage
+	CreatedAt          time.Time
+	Stats              Stats
+	AutonomousMode     bool
+	AutonomousGoal     string
+	OriginalPrompt     string
+	OriginalPromptName string
+	RetryCount         int
 }
 
 type webSessionStore struct {
@@ -75,6 +80,70 @@ func (s *webSessionStore) ensure(id string) *webSession {
 
 var webStore = newWebSessionStore()
 
+// Background job management
+type BackgroundJob struct {
+	ID        string
+	Command   string
+	Status    string // "running", "completed", "failed", "timeout"
+	Output    string
+	Error     string
+	StartTime time.Time
+	EndTime   time.Time
+	Cmd       *exec.Cmd
+	SessionID string
+}
+
+type JobStore struct {
+	mu   sync.RWMutex
+	jobs map[string]*BackgroundJob
+}
+
+func newJobStore() *JobStore {
+	return &JobStore{jobs: make(map[string]*BackgroundJob)}
+}
+
+func (s *JobStore) get(id string) (*BackgroundJob, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	job, ok := s.jobs[id]
+	return job, ok
+}
+
+func (s *JobStore) create(sessionID, command string) *BackgroundJob {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id := fmt.Sprintf("job_%d", time.Now().UnixNano())
+	job := &BackgroundJob{
+		ID:        id,
+		SessionID: sessionID,
+		Command:   command,
+		Status:    "running",
+		StartTime: time.Now(),
+	}
+	s.jobs[id] = job
+	return job
+}
+
+func (s *JobStore) listBySession(sessionID string) []*BackgroundJob {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []*BackgroundJob
+	for _, job := range s.jobs {
+		if job.SessionID == sessionID {
+			result = append(result, job)
+		}
+	}
+	return result
+}
+
+func (s *JobStore) update(job *BackgroundJob) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.jobs[job.ID] = job
+}
+
+var jobStore = newJobStore()
+
 func accent(s string) string  { return color.Format(color.PURPLE, s) }
 func info(s string) string    { return color.Format(color.BLUE, s) }
 func success(s string) string { return color.Format(color.GREEN, s) }
@@ -97,9 +166,10 @@ type ChatResponse struct {
 }
 
 type ToolResponse struct {
-	Action  string `json:"action"`            // "run_command" or "answer"
-	Command string `json:"command,omitempty"` // when action == run_command
+	Action  string `json:"action"`            // "run_command", "answer", "run_command_bg", "check_job", "get_job", "cancel_job", "list_jobs"
+	Command string `json:"command,omitempty"` // when action == run_command or run_command_bg
 	Text    string `json:"text,omitempty"`    // when action == answer
+	JobID   string `json:"jobId,omitempty"`   // for job-related actions
 }
 
 type webChatRequest struct {
@@ -108,16 +178,21 @@ type webChatRequest struct {
 }
 
 type webChatResponse struct {
-	SessionID     string        `json:"sessionId"`
-	Action        string        `json:"action"`
-	AssistantText string        `json:"assistantText,omitempty"`
-	Command       string        `json:"command,omitempty"`
-	CommandOutput string        `json:"commandOutput,omitempty"`
-	Raw           string        `json:"raw,omitempty"`
-	Messages      []ChatMessage `json:"messages"`
-	Model         string        `json:"model"`
-	Timestamp     time.Time     `json:"timestamp"`
-	Stats         Stats         `json:"stats"`
+	SessionID          string           `json:"sessionId"`
+	Action             string           `json:"action"`
+	AssistantText      string           `json:"assistantText,omitempty"`
+	Command            string           `json:"command,omitempty"`
+	CommandOutput      string           `json:"commandOutput,omitempty"`
+	Raw                string           `json:"raw,omitempty"`
+	Messages           []ChatMessage    `json:"messages"`
+	Model              string           `json:"model"`
+	Timestamp          time.Time        `json:"timestamp"`
+	Stats              Stats            `json:"stats"`
+	AutonomousMode     bool             `json:"autonomousMode,omitempty"`
+	AutonomousContinue bool             `json:"autonomousContinue,omitempty"`
+	JobID              string           `json:"jobId,omitempty"`
+	JobStatus          string           `json:"jobStatus,omitempty"`
+	Jobs               []*BackgroundJob `json:"jobs,omitempty"`
 }
 
 type webCommandRequest struct {
@@ -223,6 +298,67 @@ func runCommand(cmdStr string) string {
 	}
 
 	return runSingleCommand(sanitized)
+}
+
+// Execute command in background as a job
+func executeBackgroundCommand(sessionID, command string) (*BackgroundJob, error) {
+	sanitized := sanitizeCommand(command)
+	if sanitized == "" {
+		return nil, errors.New("empty command after sanitization")
+	}
+
+	job := jobStore.create(sessionID, sanitized)
+
+	// Create command
+	cmd := exec.Command("bash", "-c", sanitized)
+	var outBuf, errBuf bytes.Buffer
+	cmd.Stdout = &outBuf
+	cmd.Stderr = &errBuf
+	job.Cmd = cmd
+
+	log.Printf("[JOB] Starting background job %s: %s", job.ID, sanitized)
+
+	// Run in goroutine with timeout
+	go func() {
+		const MaxJobDuration = 1 * time.Hour
+		done := make(chan error, 1)
+
+		go func() {
+			done <- cmd.Run()
+		}()
+
+		select {
+		case err := <-done:
+			job.EndTime = time.Now()
+			job.Output = outBuf.String()
+
+			if err != nil {
+				job.Status = "failed"
+				job.Error = err.Error()
+				if errBuf.Len() > 0 {
+					job.Error += "\\n" + errBuf.String()
+				}
+				log.Printf("[JOB] Job %s failed: %v", job.ID, err)
+			} else {
+				job.Status = "completed"
+				log.Printf("[JOB] Job %s completed successfully", job.ID)
+			}
+			jobStore.update(job)
+
+		case <-time.After(MaxJobDuration):
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
+			job.EndTime = time.Now()
+			job.Status = "timeout"
+			job.Error = fmt.Sprintf("Job exceeded maximum duration of %v", MaxJobDuration)
+			job.Output = outBuf.String()
+			log.Printf("[JOB] Job %s timed out", job.ID)
+			jobStore.update(job)
+		}
+	}()
+
+	return job, nil
 }
 
 func runSingleCommand(sanitized string) string {
@@ -474,6 +610,8 @@ func startWebUI(bindAddr string) error {
 	mux.HandleFunc("/api/prompts/update", handleUpdatePrompt)
 	mux.HandleFunc("/api/help", handleWebHelp)
 	mux.HandleFunc("/api/command", handleWebCommand)
+	mux.HandleFunc("/api/autonomous/start", handleAutonomousStart)
+	mux.HandleFunc("/api/autonomous/stop", handleAutonomousStop)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/ollama/status", handleOllamaStatus)
 
@@ -612,6 +750,159 @@ func handleOllamaStatus(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
+type AutoStartRequest struct {
+	SessionID string `json:"sessionId"`
+	Goal      string `json:"goal"`
+}
+
+func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req AutoStartRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	req.Goal = strings.TrimSpace(req.Goal)
+	if req.Goal == "" {
+		http.Error(w, "goal required", http.StatusBadRequest)
+		return
+	}
+
+	sess := webStore.ensure(req.SessionID)
+
+	// Save original prompt
+	sess.OriginalPrompt = systemPrompt
+	sess.OriginalPromptName = systemPromptName
+
+	// Activate autonomous mode
+	sess.AutonomousMode = true
+	sess.AutonomousGoal = req.Goal
+
+	log.Printf("[AUTONOMOUS] Mode activated for session %s: goal=%s", sess.ID, req.Goal)
+
+	// Load autonomous system prompt
+	promptPath := "prompts/autonomous_agent.txt"
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load autonomous prompt: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Replace placeholders
+	autonomousPrompt := string(data)
+	autonomousPrompt = strings.ReplaceAll(autonomousPrompt, "{GOAL_DESCRIPTION}", req.Goal)
+	autonomousPrompt = strings.ReplaceAll(autonomousPrompt, "{ITERATION_HISTORY}", "No previous attempts yet.")
+
+	// Update system prompt
+	systemPrompt = autonomousPrompt
+	systemPromptName = "autonomous_agent.txt"
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessionId": sess.ID,
+		"status":    "autonomous_mode_active",
+		"message":   fmt.Sprintf("Autonomous mode activated. Goal: %s", req.Goal),
+		"goal":      req.Goal,
+	})
+}
+
+func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	sess := webStore.ensure(req.SessionID)
+
+	if !sess.AutonomousMode {
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"sessionId": sess.ID,
+			"status":    "not_active",
+			"message":   "Autonomous mode was not active",
+		})
+		return
+	}
+
+	// Restore original prompt
+	if sess.OriginalPrompt != "" {
+		systemPrompt = sess.OriginalPrompt
+		systemPromptName = sess.OriginalPromptName
+	} else {
+		// Fallback to default
+		systemPrompt = defaultSystemPrompt
+		systemPromptName = "default"
+	}
+
+	// Deactivate autonomous mode
+	sess.AutonomousMode = false
+	sess.AutonomousGoal = ""
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessionId": sess.ID,
+		"status":    "autonomous_mode_stopped",
+		"message":   "Autonomous mode deactivated. System prompt restored.",
+		"prompt":    systemPromptName,
+	})
+}
+
+func buildIterationHistory(sess *webSession) string {
+	if len(sess.Messages) == 0 {
+		return "No previous attempts yet."
+	}
+
+	// Get last few messages to show what happened
+	start := len(sess.Messages) - 6
+	if start < 0 {
+		start = 0
+	}
+
+	var history strings.Builder
+	for i := start; i < len(sess.Messages); i++ {
+		msg := sess.Messages[i]
+		if msg.Role == "user" {
+			history.WriteString(fmt.Sprintf("User: %s\n", msg.Content))
+		} else if msg.Role == "assistant" {
+			// Truncate long outputs
+			content := msg.Content
+			if len(content) > 200 {
+				content = content[:200] + "..."
+			}
+			history.WriteString(fmt.Sprintf("Assistant: %s\n", content))
+		}
+	}
+
+	if history.Len() == 0 {
+		return "No previous attempts yet."
+	}
+	return history.String()
+}
+
+func updateAutonomousPrompt(goal, history string) string {
+	promptPath := "prompts/autonomous_agent.txt"
+	data, err := os.ReadFile(promptPath)
+	if err != nil {
+		return defaultSystemPrompt
+	}
+
+	prompt := string(data)
+	prompt = strings.ReplaceAll(prompt, "{GOAL_DESCRIPTION}", goal)
+	prompt = strings.ReplaceAll(prompt, "{ITERATION_HISTORY}", history)
+
+	return prompt
+}
+
 func handleWebCommand(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -653,6 +944,8 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
+
+	log.Printf("[CHAT] Session %s, autonomous: %v", sess.ID, sess.AutonomousMode)
 
 	lower := strings.ToLower(strings.TrimSpace(req.Message))
 	switch lower {
@@ -861,6 +1154,12 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	sess.Stats.recordUser(req.Message)
 	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: req.Message})
 
+	// Update autonomous prompt if in autonomous mode
+	if sess.AutonomousMode {
+		history := buildIterationHistory(sess)
+		systemPrompt = updateAutonomousPrompt(sess.AutonomousGoal, history)
+	}
+
 	messages := make([]ChatMessage, 0, len(sess.Messages)+1)
 	messages = append(messages, ChatMessage{Role: "system", Content: systemPrompt})
 	messages = append(messages, sess.Messages...)
@@ -872,6 +1171,18 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	clean := strings.TrimSpace(raw)
+
+	// Strip common prefixes that agent might mimic from conversation history
+	if strings.HasPrefix(clean, "Command output:") {
+		clean = strings.TrimPrefix(clean, "Command output:")
+		clean = strings.TrimSpace(clean)
+	}
+	if strings.HasPrefix(clean, "✓ Result:") {
+		clean = strings.TrimPrefix(clean, "✓ Result:")
+		clean = strings.TrimSpace(clean)
+	}
+
+	// Strip markdown code blocks
 	if strings.HasPrefix(clean, "```") {
 		if i := strings.Index(clean, "\n"); i != -1 {
 			clean = clean[i+1:]
@@ -882,6 +1193,94 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 	var tool ToolResponse
 	if err := json.Unmarshal([]byte(clean), &tool); err != nil {
+		// In autonomous mode, if JSON parsing fails, force agent to correct itself
+		if sess.AutonomousMode {
+			sess.RetryCount++
+			truncLen := 100
+			if len(clean) < truncLen {
+				truncLen = len(clean)
+			}
+			log.Printf("[AUTONOMOUS] JSON parse failed (retry %d/3): %v. Response was: %s", sess.RetryCount, err, clean[:truncLen])
+
+			// After 3 retries, stop autonomous mode
+			if sess.RetryCount >= 3 {
+				sess.AutonomousMode = false
+				sess.RetryCount = 0
+				systemPrompt = sess.OriginalPrompt
+				systemPromptName = sess.OriginalPromptName
+				log.Printf("[AUTONOMOUS] Max retries reached, stopping autonomous mode")
+
+				sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
+				errorText := "❌ Autonomous mode stopped: Agent failed to produce valid JSON after 3 retries. Please provide clearer instructions or try a different approach."
+				sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: errorText})
+
+				writeJSON(w, http.StatusOK, webChatResponse{
+					SessionID:          sess.ID,
+					Action:             "answer",
+					AssistantText:      errorText,
+					Raw:                raw,
+					Messages:           sess.Messages,
+					Model:              modelName,
+					Timestamp:          time.Now().UTC(),
+					Stats:              sess.Stats,
+					AutonomousMode:     false,
+					AutonomousContinue: false,
+				})
+				return
+			}
+
+			// Send error feedback to agent with their invalid response
+			// Truncate the invalid response to 500 chars so agent can see what it wrote
+			invalidResponsePreview := raw
+			if len(invalidResponsePreview) > 500 {
+				invalidResponsePreview = invalidResponsePreview[:500] + "\n... [truncated]"
+			}
+
+			errorMsg := fmt.Sprintf(`ERROR: Your response was not valid JSON (retry %d/3).
+
+YOU WROTE THIS (which is WRONG):
+---
+%s
+---
+
+PROBLEMS WITH YOUR RESPONSE:
+- It starts with "Command output:" - NEVER write this! This is only for SYSTEM messages showing results.
+- You added markdown code blocks (backticks) - FORBIDDEN!
+- Your response contains text BEFORE or AFTER the JSON object
+
+ABSOLUTE RULE: Your ENTIRE response must be ONLY this pattern:
+{"action":"run_command","command":"your_command_here"}
+
+WRONG examples (what you did):
+❌ Command output:\n{"action":...}
+❌ `+"```json"+`\n{"action":...}\n`+"```"+`
+❌ Here is the command: {"action":...}
+
+CORRECT example (what you MUST do):
+✅ {"action":"run_command","command":"nslookup michalswi.azurewebsites.net"}
+
+Your response must be EXACTLY that - nothing before {, nothing after }.
+Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePreview)
+
+			sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
+			sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: errorMsg})
+
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:          sess.ID,
+				Action:             "error",
+				AssistantText:      fmt.Sprintf("⚠️ Agent broke JSON format (retry %d/3). Forcing correction...", sess.RetryCount),
+				Raw:                raw,
+				Messages:           sess.Messages,
+				Model:              modelName,
+				Timestamp:          time.Now().UTC(),
+				Stats:              sess.Stats,
+				AutonomousMode:     sess.AutonomousMode,
+				AutonomousContinue: true, // Force retry
+			})
+			return
+		}
+
+		// Non-autonomous mode: just show the raw output
 		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,
@@ -896,17 +1295,24 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Reset retry count on successful JSON parse
+	if sess.AutonomousMode {
+		sess.RetryCount = 0
+	}
+
 	switch tool.Action {
 	case "run_command":
 		sess.Stats.recordCommand(tool.Command)
 		out := runCommand(tool.Command)
-		content := "Command output:\n" + out
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
 
-		combined := content
+		// Store command output with different prefix to avoid agent mimicking it
+		messageContent := "✓ Result:\n" + out
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+
+		combined := messageContent
 		if autoAnalyze {
 			analysisPrompt := "Analyze the command output above and summarize key points. Do not request or run additional commands."
-			analysisMessages := append(messages, ChatMessage{Role: "assistant", Content: content})
+			analysisMessages := append(messages, ChatMessage{Role: "assistant", Content: messageContent})
 			analysisMessages = append(analysisMessages, ChatMessage{Role: "user", Content: analysisPrompt})
 			analysisRaw, err := callOllamaWithLog("web-chat-analysis:"+sess.ID, analysisMessages)
 			if err == nil {
@@ -932,28 +1338,256 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		autoContinue := sess.AutonomousMode
+
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:     sess.ID,
-			Action:        "run_command",
-			AssistantText: combined,
-			Command:       tool.Command,
-			CommandOutput: out,
-			Messages:      sess.Messages,
-			Model:         modelName,
-			Timestamp:     time.Now().UTC(),
-			Stats:         sess.Stats,
+			SessionID:          sess.ID,
+			Action:             "run_command",
+			AssistantText:      combined,
+			Command:            tool.Command,
+			CommandOutput:      out,
+			Messages:           sess.Messages,
+			Model:              modelName,
+			Timestamp:          time.Now().UTC(),
+			Stats:              sess.Stats,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousContinue: autoContinue,
 		})
+
+	case "run_command_bg":
+		sess.Stats.recordCommand(tool.Command)
+		job, err := executeBackgroundCommand(sess.ID, tool.Command)
+		if err != nil {
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "error",
+				AssistantText: fmt.Sprintf("Failed to start background job: %v", err),
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+
+		messageContent := fmt.Sprintf("Started background job: %s\nCommand: %s\nStatus: %s", job.ID, job.Command, job.Status)
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+
+		autoContinue := sess.AutonomousMode
+
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:          sess.ID,
+			Action:             "run_command_bg",
+			AssistantText:      messageContent,
+			Command:            tool.Command,
+			JobID:              job.ID,
+			JobStatus:          job.Status,
+			Messages:           sess.Messages,
+			Model:              modelName,
+			Timestamp:          time.Now().UTC(),
+			Stats:              sess.Stats,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousContinue: autoContinue,
+		})
+
+	case "check_job":
+		job, ok := jobStore.get(tool.JobID)
+		if !ok {
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "error",
+				AssistantText: fmt.Sprintf("Job not found: %s", tool.JobID),
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+
+		// Show current job output (may be partial if job still running)
+		partialOutput := job.Output
+		if len(partialOutput) > 1000 {
+			partialOutput = partialOutput[:1000] + "\n... (truncated, use get_job to see full output)"
+		}
+
+		messageContent := fmt.Sprintf("Job %s status: %s\nCommand: %s\nStarted: %s\nPartial output:\n%s",
+			job.ID, job.Status, job.Command, job.StartTime.Format(time.RFC3339), partialOutput)
+
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+
+		autoContinue := sess.AutonomousMode
+
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:          sess.ID,
+			Action:             "check_job",
+			AssistantText:      messageContent,
+			JobID:              job.ID,
+			JobStatus:          job.Status,
+			CommandOutput:      partialOutput,
+			Messages:           sess.Messages,
+			Model:              modelName,
+			Timestamp:          time.Now().UTC(),
+			Stats:              sess.Stats,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousContinue: autoContinue,
+		})
+
+	case "get_job":
+		job, ok := jobStore.get(tool.JobID)
+		if !ok {
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "error",
+				AssistantText: fmt.Sprintf("Job not found: %s", tool.JobID),
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+
+		duration := ""
+		if !job.EndTime.IsZero() {
+			duration = job.EndTime.Sub(job.StartTime).String()
+		}
+
+		// Store full job output in messages (agent needs complete context)
+		messageContent := fmt.Sprintf("Job %s final results:\nStatus: %s\nCommand: %s\nDuration: %s\n\nFull output:\n%s",
+			job.ID, job.Status, job.Command, duration, job.Output)
+		if job.Error != "" {
+			messageContent += fmt.Sprintf("\n\nError:\n%s", job.Error)
+		}
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+
+		autoContinue := sess.AutonomousMode
+
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:          sess.ID,
+			Action:             "get_job",
+			AssistantText:      messageContent,
+			JobID:              job.ID,
+			JobStatus:          job.Status,
+			CommandOutput:      job.Output,
+			Messages:           sess.Messages,
+			Model:              modelName,
+			Timestamp:          time.Now().UTC(),
+			Stats:              sess.Stats,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousContinue: autoContinue,
+		})
+
+	case "cancel_job":
+		job, ok := jobStore.get(tool.JobID)
+		if !ok {
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "error",
+				AssistantText: fmt.Sprintf("Job not found: %s", tool.JobID),
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+			return
+		}
+
+		if job.Status == "running" && job.Cmd != nil && job.Cmd.Process != nil {
+			job.Cmd.Process.Kill()
+			job.Status = "cancelled"
+			job.EndTime = time.Now()
+			jobStore.update(job)
+			content := fmt.Sprintf("Job %s cancelled", job.ID)
+			sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
+
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:          sess.ID,
+				Action:             "cancel_job",
+				AssistantText:      content,
+				JobID:              job.ID,
+				JobStatus:          job.Status,
+				Messages:           sess.Messages,
+				Model:              modelName,
+				Timestamp:          time.Now().UTC(),
+				Stats:              sess.Stats,
+				AutonomousMode:     sess.AutonomousMode,
+				AutonomousContinue: sess.AutonomousMode,
+			})
+		} else {
+			content := fmt.Sprintf("Job %s is not running (status: %s)", job.ID, job.Status)
+			sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
+
+			writeJSON(w, http.StatusOK, webChatResponse{
+				SessionID:     sess.ID,
+				Action:        "answer",
+				AssistantText: content,
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+			})
+		}
+
+	case "list_jobs":
+		jobs := jobStore.listBySession(sess.ID)
+		content := fmt.Sprintf("Active jobs for this session (%d):\n", len(jobs))
+		for _, job := range jobs {
+			status := job.Status
+			if job.Status == "running" {
+				duration := time.Since(job.StartTime).Round(time.Second)
+				status = fmt.Sprintf("running (%s)", duration)
+			}
+			content += fmt.Sprintf("- %s: %s [%s]\n", job.ID, job.Command, status)
+		}
+		if len(jobs) == 0 {
+			content = "No background jobs in this session"
+		}
+		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
+
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID:          sess.ID,
+			Action:             "list_jobs",
+			AssistantText:      content,
+			Jobs:               jobs,
+			Messages:           sess.Messages,
+			Model:              modelName,
+			Timestamp:          time.Now().UTC(),
+			Stats:              sess.Stats,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousContinue: sess.AutonomousMode,
+		})
+
 	case "answer":
 		sess.Stats.recordAssistant(tool.Text)
 		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: tool.Text})
+
+		// In autonomous mode, answer means either completion or the agent is confused
+		// Only stop if it explicitly says the goal is achieved/impossible
+		autoContinue := false
+		if sess.AutonomousMode {
+			lowerText := strings.ToLower(tool.Text)
+			if strings.Contains(lowerText, "goal achieved") ||
+				strings.Contains(lowerText, "goal completed") ||
+				strings.Contains(lowerText, "impossible") ||
+				strings.Contains(lowerText, "cannot be achieved") {
+				autoContinue = false
+			} else {
+				// Agent is just talking instead of executing - force it to continue
+				autoContinue = true
+			}
+		}
+
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:     sess.ID,
-			Action:        "answer",
-			AssistantText: tool.Text,
-			Messages:      sess.Messages,
-			Model:         modelName,
-			Timestamp:     time.Now().UTC(),
-			Stats:         sess.Stats,
+			SessionID:          sess.ID,
+			Action:             "answer",
+			AssistantText:      tool.Text,
+			Messages:           sess.Messages,
+			Model:              modelName,
+			Timestamp:          time.Now().UTC(),
+			Stats:              sess.Stats,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousContinue: autoContinue,
 		})
 	default:
 		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
