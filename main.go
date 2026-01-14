@@ -41,8 +41,9 @@ type webSession struct {
 	OriginalPrompt     string
 	OriginalPromptName string
 	RetryCount         int
-	CommandCount       int    // Tracks commands executed in autonomous mode
-	PartialFindings    string // Stores completed parts of the goal to avoid re-running
+	CommandCount       int      // Tracks commands executed in autonomous mode
+	PartialFindings    string   // Stores completed parts of the goal to avoid re-running
+	LastCommands       []string // Track last 3 commands to prevent duplicates
 }
 
 type webSessionStore struct {
@@ -923,6 +924,11 @@ func buildIterationHistory(sess *webSession) string {
 	return history.String()
 }
 
+// Get last 3 executed commands to prevent duplicates
+func getRecentCommands(sess *webSession) []string {
+	return sess.LastCommands
+}
+
 func updateAutonomousPrompt(goal, history string) string {
 	promptPath := "prompts/autonomous_agent.txt"
 	data, err := os.ReadFile(promptPath)
@@ -1339,6 +1345,13 @@ Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePrevi
 	switch tool.Action {
 	case "run_command":
 		sess.Stats.recordCommand(tool.Command)
+
+		// Track command in session (keep last 3)
+		sess.LastCommands = append(sess.LastCommands, tool.Command)
+		if len(sess.LastCommands) > 3 {
+			sess.LastCommands = sess.LastCommands[len(sess.LastCommands)-3:]
+		}
+
 		out := runCommand(tool.Command)
 
 		// Store command output with different prefix to avoid agent mimicking it
@@ -1413,10 +1426,21 @@ CRITICAL DECISION:
 
 Do NOT re-run commands for data you already found (✅ section). Focus ONLY on missing parts.`, sess.CommandCount, sess.AutonomousGoal, partialSection, history)
 			} else {
-				// Simple continuation - just keep working
-				analysisPrompt = `Continue working toward the goal. What's your next command?
+				// Simple continuation - include recent commands to prevent duplicates
+				recentCmds := getRecentCommands(sess)
+				cmdHistory := ""
+				if len(recentCmds) > 0 {
+					cmdHistory = "\n\n⚠️ Commands you JUST executed:\n"
+					for _, cmd := range recentCmds {
+						cmdHistory += "- " + cmd + "\n"
+					}
+					cmdHistory += "\nDo NOT repeat these commands. Move to the NEXT step of the goal.\n"
+				}
 
-{"action":"run_command","command":"<next_command>"}`
+				analysisPrompt = fmt.Sprintf(`Continue working toward the goal.%s
+What's your NEXT command (different from above)?
+
+{"action":"run_command","command":"<next_command>"}`, cmdHistory)
 			}
 
 			sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: analysisPrompt})
@@ -1714,23 +1738,32 @@ Do NOT re-run commands for data you already found (✅ section). Focus ONLY on m
 		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: tool.Text})
 
 		// In autonomous mode, "answer" action means goal complete - stop autonomous mode
+		wasAutonomous := sess.AutonomousMode
 		if sess.AutonomousMode {
 			sess.AutonomousMode = false
 			systemPrompt = sess.OriginalPrompt
 			systemPromptName = sess.OriginalPromptName
 			sess.PartialFindings = "" // Clear findings when done
+			sess.LastCommands = nil   // Clear command history
 			log.Printf("[AUTONOMOUS] Goal completed with final summary, stopping autonomous mode")
 		}
 
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:     sess.ID,
-			Action:        "answer",
-			AssistantText: tool.Text,
-			Messages:      sess.Messages,
-			Model:         modelName,
-			Timestamp:     time.Now().UTC(),
-			Stats:         sess.Stats,
+			SessionID:          sess.ID,
+			Action:             "answer",
+			AssistantText:      tool.Text,
+			Messages:           sess.Messages,
+			Model:              modelName,
+			Timestamp:          time.Now().UTC(),
+			Stats:              sess.Stats,
+			AutonomousMode:     false, // Explicitly set to false
+			AutonomousContinue: false, // Stop the loop
 		})
+
+		// If it was autonomous, call /autonomous/stop endpoint
+		if wasAutonomous {
+			log.Printf("[AUTONOMOUS] Triggering auto-stop for session %s", sess.ID)
+		}
 	default:
 		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
 		writeJSON(w, http.StatusOK, webChatResponse{

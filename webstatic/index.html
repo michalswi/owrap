@@ -162,12 +162,14 @@
         <button id="showMyPrompts" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">/myprompts</button>
         <button id="autoOn" type="button">/auto-on</button>
         <button id="autoOff" type="button">/auto-off</button>
-        <button id="autonomousStart" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🤖 /autostart</button>
-        <button id="autonomousStop" type="button" style="background: linear-gradient(135deg, #64748b, #475569); display: none;">⏹️ /autostop</button>
         <button id="saveSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/save</button>
         <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
         <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
         <button id="showLast" type="button">/last</button>
+      </div>
+      <div class="stack" style="justify-content: center; margin-top: 10px;">
+        <button id="autonomousStart" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🤖 /autostart</button>
+        <button id="autonomousStop" type="button" style="background: linear-gradient(135deg, #64748b, #475569); display: none;">⏹️ /autostop</button>
       </div>
       <div style="text-align: center; margin-top: 4px;">
         <span id="fileName" class="file-name"></span>
@@ -299,6 +301,7 @@
     let lastResponseTime = null;
     let pendingFile = null;
     let lastUserMessage = ''; // Track last user message for UI feedback
+    let isAutonomousActive = false; // Track if autonomous mode is currently running
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -339,13 +342,14 @@
     });
 
     function showMyPrompts() {
-      // Extract all user messages from the log
+      // Extract all user messages from the log, excluding autonomous mode messages
       const logLines = logEl.querySelectorAll('.log-line');
       const userPrompts = [];
       
       logLines.forEach(line => {
         const userLabel = line.querySelector('.label-user');
-        if (userLabel) {
+        // Skip if it has the data-skip-myprompts attribute
+        if (userLabel && !line.hasAttribute('data-skip-myprompts')) {
           // Extract text after "You: "
           const fullText = line.textContent;
           const promptText = fullText.replace(/^You:\s*/, '').trim();
@@ -712,11 +716,11 @@
         const data = await res.json();
         if (data.ready) {
           ollamaStatusLight.className = 'status-light ready';
-          ollamaStatusText.textContent = 'ready';
+          ollamaStatusText.textContent = 'modelReady';
           ollamaStatusLight.title = 'Ollama is ready';
         } else {
           ollamaStatusLight.className = 'status-light not-ready';
-          ollamaStatusText.textContent = 'not ready';
+          ollamaStatusText.textContent = 'modelNotReady';
           ollamaStatusLight.title = data.error || 'Ollama is not responding';
         }
       } catch (e) {
@@ -788,14 +792,14 @@
       await sendText(apiText, true, displayText);
     }
 
-    async function sendText(text, fromInput = false, displayText = null) {
+    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false) {
       if (!text) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
       setSending(true);
       appendSeparator();
-      appendLine(`You: ${displayText || text}`, 'user');
+      appendLine(`You: ${displayText || text}`, 'user', skipMyPrompts);
       
       // Track last user message for UI feedback
       lastUserMessage = text;
@@ -932,12 +936,7 @@
               // Error message already includes retry count from backend
               appendLine(data.assistantText, 'error');
               setTimeout(() => {
-                sendText('retry'); // Trigger retry with error feedback already in messages
-              }, 1500);
-            } else if (data.action === 'answer') {
-              appendLine('⚠️  Agent is explaining instead of executing. Forcing next iteration...', 'plain');
-              setTimeout(() => {
-                sendText('STOP TALKING. Execute the command NOW. Respond with {"action":"run_command","command":"..."}');
+                sendText('retry', false, null, true); // skipMyPrompts=true - Trigger retry with error feedback already in messages
               }, 1500);
             } else {
               // Show different message based on goal review cycle
@@ -948,9 +947,19 @@
                 appendLine('🔄 Continuing autonomous loop...', 'plain');
               }
               setTimeout(() => {
-                sendText('next step');
+                sendText('next step', false, null, true); // skipMyPrompts=true
               }, 1500);
             }
+          } else if (isAutonomousActive && !data.autonomousMode && data.action === 'answer') {
+            // Agent provided final answer and stopped autonomous mode
+            appendSeparator();
+            appendLine('🏁 Goal achieved! Autonomous mode stopped.', 'plain');
+            // Hide autonomous banner and trigger stop
+            autonomousGoalBanner.style.display = 'none';
+            autonomousStartBtn.style.display = 'inline-flex';
+            autonomousStopBtn.style.display = 'none';
+            enableAllButtons(); // Re-enable all buttons
+            isAutonomousActive = false; // Reset flag
           } else if (data.autonomousMode && !data.autonomousContinue) {
             appendSeparator();
             appendLine('🏁 Autonomous loop complete (max iterations reached or goal achieved)', 'plain');
@@ -972,7 +981,7 @@
       sendSpinner.setAttribute('aria-hidden', (!active).toString());
     }
 
-    function appendLine(text, kind = 'plain') {
+    function appendLine(text, kind = 'plain', skipMyPrompts = false) {
       let prefix = '';
       let body = text;
       if (kind === 'user' || kind === 'assistant') {
@@ -995,7 +1004,8 @@
       const safePrefix = escapeHtml(prefix);
       const labelHtml = labelCls ? `<span class="${labelCls}">${safePrefix}</span>` : safePrefix;
       const renderedBody = ansiToHtml(body);
-      logEl.insertAdjacentHTML('beforeend', `<div class="log-line ${cls}">${labelHtml}${renderedBody}</div>`);
+      const skipAttr = skipMyPrompts ? ' data-skip-myprompts="true"' : '';
+      logEl.insertAdjacentHTML('beforeend', `<div class="log-line ${cls}"${skipAttr}>${labelHtml}${renderedBody}</div>`);
       logEl.scrollTop = logEl.scrollHeight;
     }
 
@@ -1117,11 +1127,11 @@
         
         <div style="margin-top: 16px;">
           <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">Goal:</label>
-          <textarea id="autoGoalInput" placeholder="Example: Find the IP and owner of https://example.com. Look for all GitHub links on the page. Make a report with IP, owner info, and list of GitHub links." style="min-height: 120px; font-size: 13px;"></textarea>
+          <textarea id="autoGoalInput" placeholder="Example: Check the weather for Wrocław on the website wttr.in and create a report." style="min-height: 120px; font-size: 13px;"></textarea>
         </div>
         
         <div style="margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; font-size: 12px; color: var(--muted);">
-          ⚠️ <strong>Autonomous Mode:</strong> The agent will work CONTINUOUSLY until the goal is fully achieved or proven impossible. It can run background jobs and work in parallel. Use /autostop to stop.
+          ⚠️ <strong>Autonomous Mode:</strong> Best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
         </div>
         
         <div style="margin-top: 16px; display: flex; gap: 10px;">
@@ -1188,6 +1198,8 @@
         autonomousStartBtn.style.display = 'none';
         autonomousStopBtn.style.display = 'inline-flex';
         promptEl.textContent = 'sys-prompt: autonomous_agent.txt';
+        disableAllButtons(); // Disable all other buttons
+        isAutonomousActive = true; // Set flag
         
         // Show and update autonomous goal banner
         autonomousGoalBanner.style.display = 'block';
@@ -1203,7 +1215,7 @@
         
         // Automatically start the first iteration
         setTimeout(() => {
-          sendText('start working on the goal');
+          sendText('start working on the goal', false, null, true); // skipMyPrompts=true
         }, 1000);
         
       } catch (err) {
@@ -1230,6 +1242,8 @@
         autonomousStartBtn.style.display = 'inline-flex';
         autonomousStopBtn.style.display = 'none';
         autonomousGoalBanner.style.display = 'none';
+        enableAllButtons(); // Re-enable all buttons
+        isAutonomousActive = false; // Reset flag
         
         appendSeparator();
         appendLine('⏹️ Autonomous mode STOPPED', 'assistant');
@@ -1243,6 +1257,56 @@
       } catch (err) {
         appendLine(`❌ Error stopping autonomous mode: ${err.message}`, 'error');
       }
+    }
+
+    function disableAllButtons() {
+      // Disable all buttons except /autostop
+      promptBtn.disabled = true;
+      editPromptBtn.disabled = true;
+      helpBtn.disabled = true;
+      myPromptsBtn.disabled = true;
+      lastBtn.disabled = true;
+      clearBtn.disabled = true;
+      saveBtn.disabled = true;
+      loadBtn.disabled = true;
+      listBtn.disabled = true;
+      autoOnBtn.disabled = true;
+      autoOffBtn.disabled = true;
+      document.querySelector('.file-upload-btn').disabled = true;
+      fileUpload.disabled = true;
+      
+      // Apply disabled styling
+      const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+      buttons.forEach(btn => {
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+      });
+    }
+
+    function enableAllButtons() {
+      // Re-enable all buttons
+      promptBtn.disabled = false;
+      editPromptBtn.disabled = false;
+      helpBtn.disabled = false;
+      myPromptsBtn.disabled = false;
+      lastBtn.disabled = false;
+      clearBtn.disabled = false;
+      saveBtn.disabled = false;
+      loadBtn.disabled = false;
+      listBtn.disabled = false;
+      autoOnBtn.disabled = false;
+      autoOffBtn.disabled = false;
+      document.querySelector('.file-upload-btn').disabled = false;
+      fileUpload.disabled = false;
+      
+      // Remove disabled styling
+      const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+      buttons.forEach(btn => {
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+      });
     }
 
     function escapeHtml(str) {
