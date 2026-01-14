@@ -46,6 +46,7 @@ type webSession struct {
 	LastCommands       []string        // Track last 3 commands to prevent duplicates
 	AttachedFile       *FileAttachment // File attached when starting autonomous mode
 	AttachedFilePath   string          // Temp path where file is stored on disk
+	AutoAnalyze        bool            // Per-session auto-analysis mode
 }
 
 type webSessionStore struct {
@@ -834,7 +835,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	lower := strings.ToLower(strings.TrimSpace(req.Message))
 	switch lower {
 	case "/auto-on":
-		autoAnalyze = true
+		sess.AutoAnalyze = true
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,
 			Action:        "answer",
@@ -846,7 +847,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	case "/auto-off":
-		autoAnalyze = false
+		sess.AutoAnalyze = false
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,
 			Action:        "answer",
@@ -1131,7 +1132,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 		// Non-autonomous mode: optional auto-analysis
 		combined := messageContent
-		if autoAnalyze {
+		if sess.AutoAnalyze {
 			analysisPrompt := "Analyze the command output above and summarize key points. Do not request or run additional commands."
 			analysisMessages := append(messages, ChatMessage{Role: "assistant", Content: messageContent})
 			analysisMessages = append(analysisMessages, ChatMessage{Role: "user", Content: analysisPrompt})
