@@ -1132,31 +1132,51 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 		// Non-autonomous mode: optional auto-analysis
 		combined := messageContent
+		log.Printf("[AUTO-ANALYSIS] sess.AutoAnalyze=%v for session %s", sess.AutoAnalyze, sess.ID)
 		if sess.AutoAnalyze {
-			analysisPrompt := "Analyze the command output above and summarize key points. Do not request or run additional commands."
-			analysisMessages := append(messages, ChatMessage{Role: "assistant", Content: messageContent})
-			analysisMessages = append(analysisMessages, ChatMessage{Role: "user", Content: analysisPrompt})
+			log.Printf("[AUTO-ANALYSIS] Running analysis for session %s", sess.ID)
+
+			// Create analysis messages with simple system prompt override
+			analysisPrompt := "Analyze the command output above and provide a brief summary of the key points in plain text. Do not use JSON format."
+
+			// Build messages with a plain text instruction
+			analysisSystemMsg := ChatMessage{
+				Role:    "system",
+				Content: "You are a helpful assistant that analyzes command output and provides clear, concise summaries in plain text. Do not use JSON format.",
+			}
+			analysisUserMsg := ChatMessage{
+				Role:    "user",
+				Content: "Command output:\n" + out + "\n\n" + analysisPrompt,
+			}
+
+			analysisMessages := []ChatMessage{analysisSystemMsg, analysisUserMsg}
 			analysisRaw, err := callOllamaWithLog("web-chat-analysis:"+sess.ID, analysisMessages, false)
 			if err == nil {
-				analysisClean := strings.TrimSpace(analysisRaw)
-				if strings.HasPrefix(analysisClean, "```") {
-					if i := strings.Index(analysisClean, "\n"); i != -1 {
-						analysisClean = analysisClean[i+1:]
+				analysisText := strings.TrimSpace(analysisRaw)
+
+				// Try to parse as JSON if model still returns it (extract text field)
+				var analysis ToolResponse
+				if err := json.Unmarshal([]byte(analysisText), &analysis); err == nil && analysis.Text != "" {
+					// Successfully parsed JSON, use the text field
+					analysisText = analysis.Text
+					log.Printf("[AUTO-ANALYSIS] Extracted text from JSON response")
+				} else {
+					// Not JSON or no text field, clean up markdown code blocks if present
+					if strings.HasPrefix(analysisText, "```") {
+						if i := strings.Index(analysisText, "\n"); i != -1 {
+							analysisText = analysisText[i+1:]
+						}
+						analysisText = strings.TrimSuffix(analysisText, "```")
+						analysisText = strings.TrimSpace(analysisText)
 					}
-					analysisClean = strings.TrimSuffix(analysisClean, "```")
-					analysisClean = strings.TrimSpace(analysisClean)
+					log.Printf("[AUTO-ANALYSIS] Using plain text response")
 				}
 
-				var analysis ToolResponse
-				if err := json.Unmarshal([]byte(analysisClean), &analysis); err == nil && analysis.Action == "answer" {
-					analysisText := analysis.Text
-					sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: analysisText})
-					sess.Stats.recordAssistant(analysisText)
-					combined = combined + "\n\nAnalysis:\n" + analysisText
-				} else {
-					sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: analysisRaw})
-					combined = combined + "\n\nAnalysis (raw):\n" + analysisRaw
-				}
+				sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: analysisText})
+				sess.Stats.recordAssistant(analysisText)
+				combined = combined + "\n\n📝 Analysis:\n" + analysisText
+			} else {
+				log.Printf("[AUTO-ANALYSIS] Error: %v", err)
 			}
 		}
 
