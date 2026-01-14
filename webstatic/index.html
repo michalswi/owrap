@@ -1147,6 +1147,16 @@
           <textarea id="autoGoalInput" placeholder="Example: Check the weather for Wrocław on the website wttr.in and create a report." style="min-height: 120px; font-size: 13px;"></textarea>
         </div>
         
+        <div style="margin-top: 16px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">📎 Attach file (optional):</label>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button id="autoFileUploadBtn" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed); padding: 8px 16px;">Choose File</button>
+            <span id="autoFileInfo" style="font-size:12px; color:var(--muted);">No file selected</span>
+            <input type="file" id="autoFileInput" accept="*/*" style="display:none;" />
+          </div>
+          <div style="margin-top:6px; font-size:11px; color:var(--muted);">Useful for providing context, data, or reference material for the autonomous task</div>
+        </div>
+        
         <div style="margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; font-size: 12px; color: var(--muted);">
           ⚠️ <strong>Autonomous Mode:</strong> Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
         </div>
@@ -1162,8 +1172,44 @@
       const goalInput = document.getElementById('autoGoalInput');
       const confirmBtn = document.getElementById('startAutonomousConfirm');
       const cancelBtn = document.getElementById('startAutonomousCancel');
+      const fileUploadBtn = document.getElementById('autoFileUploadBtn');
+      const fileInput = document.getElementById('autoFileInput');
+      const fileInfo = document.getElementById('autoFileInfo');
+      
+      let autonomousFile = null;
       
       goalInput.focus();
+      
+      // Handle file selection
+      fileUploadBtn.addEventListener('click', () => {
+        fileInput.click();
+      });
+      
+      fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        fileInfo.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Loading...`;
+        fileInfo.style.color = 'var(--accent-2)';
+        
+        try {
+          const content = await readFileContent(file);
+          autonomousFile = {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            content: content
+          };
+          console.log('File attached:', { name: file.name, size: file.size, contentLength: content?.length || 0 });
+          fileInfo.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Ready`;
+          fileInfo.style.color = 'var(--success)';
+        } catch (err) {
+          console.error('Error reading file:', err);
+          fileInfo.textContent = `❌ Error reading file: ${err.message}`;
+          fileInfo.style.color = '#ef4444';
+          autonomousFile = null;
+        }
+      });
       
       const doStart = async () => {
         const goal = goalInput.value.trim();
@@ -1174,7 +1220,7 @@
         }
         
         closeModal();
-        await startAutonomousMode(goal);
+        await startAutonomousMode(goal, autonomousFile);
       };
       
       confirmBtn.addEventListener('click', doStart);
@@ -1188,15 +1234,27 @@
       });
     }
 
-    async function startAutonomousMode(goal) {
+    async function startAutonomousMode(goal, file = null) {
       try {
+        const requestBody = { sessionId, goal };
+        
+        // Include file if provided
+        if (file) {
+          console.log('Sending file with autonomous start:', { name: file.name, size: file.size, hasContent: !!file.content });
+          requestBody.file = {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            content: file.content
+          };
+        } else {
+          console.log('No file attached to autonomous start');
+        }
+        
         const res = await fetch('/api/autonomous/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            sessionId, 
-            goal
-          })
+          body: JSON.stringify(requestBody)
         });
         
         const data = await res.json();
@@ -1210,6 +1268,10 @@
         sessionId = data.sessionId;
         sessionEl.textContent = `session: ${sessionId}`;
         console.log('Autonomous mode started with sessionId:', sessionId);
+        
+        // Store file path if file was attached
+        const attachedFilePath = data.filePath || null;
+        const attachedFileName = data.fileName || null;
         
         // Update UI
         autonomousStartBtn.style.display = 'none';
@@ -1226,6 +1288,9 @@
         appendSeparator();
         appendLine('🤖 Autonomous mode ACTIVATED', 'assistant');
         appendLine(`Goal: ${goal}`, 'assistant');
+        if (attachedFilePath) {
+          appendLine(`📎 File available: ${attachedFileName} at ${attachedFilePath}`, 'assistant');
+        }
         appendSeparator();
         appendLine('💡 Starting autonomous work...', 'assistant');
         appendSeparator();
@@ -1233,7 +1298,14 @@
         
         // Automatically start the first iteration
         setTimeout(() => {
-          sendText('start working on the goal', false, null, true); // skipMyPrompts=true
+          let firstMessage = 'start working on the goal';
+          
+          // If file was attached, inform agent of the file path
+          if (attachedFilePath) {
+            firstMessage = `start working on the goal. The file "${attachedFileName}" is available at: ${attachedFilePath}. Use it as needed.`;
+          }
+          
+          sendText(firstMessage, false, null, true); // skipMyPrompts=true
         }, 1000);
         
       } catch (err) {

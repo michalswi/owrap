@@ -41,9 +41,11 @@ type webSession struct {
 	OriginalPrompt     string
 	OriginalPromptName string
 	RetryCount         int
-	CommandCount       int      // Tracks commands executed in autonomous mode
-	PartialFindings    string   // Stores completed parts of the goal to avoid re-running
-	LastCommands       []string // Track last 3 commands to prevent duplicates
+	CommandCount       int             // Tracks commands executed in autonomous mode
+	PartialFindings    string          // Stores completed parts of the goal to avoid re-running
+	LastCommands       []string        // Track last 3 commands to prevent duplicates
+	AttachedFile       *FileAttachment // File attached when starting autonomous mode
+	AttachedFilePath   string          // Temp path where file is stored on disk
 }
 
 type webSessionStore struct {

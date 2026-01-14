@@ -6,14 +6,23 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
 
 // AutoStartRequest represents the JSON body for starting autonomous mode
+type FileAttachment struct {
+	Name    string `json:"name"`
+	Size    int64  `json:"size"`
+	Type    string `json:"type"`
+	Content string `json:"content"`
+}
+
 type AutoStartRequest struct {
-	SessionID string `json:"sessionId"`
-	Goal      string `json:"goal"`
+	SessionID string          `json:"sessionId"`
+	Goal      string          `json:"goal"`
+	File      *FileAttachment `json:"file,omitempty"`
 }
 
 // handleAutonomousStart activates autonomous mode for a session
@@ -45,7 +54,31 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	sess.AutonomousMode = true
 	sess.AutonomousGoal = req.Goal
 
-	log.Printf("[AUTONOMOUS] Mode activated for session %s: goal=%s", sess.ID, req.Goal)
+	// Store file attachment if provided and write to temp directory
+	var filePath string
+	if req.File != nil {
+		sess.AttachedFile = req.File
+
+		// Create temp directory for this session's files
+		tempDir := filepath.Join("/tmp", "owrap_autonomous_files", sess.ID)
+		if err := os.MkdirAll(tempDir, 0755); err != nil {
+			log.Printf("[AUTONOMOUS] Warning: failed to create temp dir: %v", err)
+		} else {
+			// Write file to temp directory
+			filePath = filepath.Join(tempDir, req.File.Name)
+			if err := os.WriteFile(filePath, []byte(req.File.Content), 0644); err != nil {
+				log.Printf("[AUTONOMOUS] Warning: failed to write temp file: %v", err)
+				filePath = "" // Clear path if write failed
+			} else {
+				sess.AttachedFilePath = filePath
+				log.Printf("[AUTONOMOUS] Mode activated for session %s: goal=%s, file=%s, path=%s", sess.ID, req.Goal, req.File.Name, filePath)
+			}
+		}
+	} else {
+		sess.AttachedFile = nil
+		sess.AttachedFilePath = ""
+		log.Printf("[AUTONOMOUS] Mode activated for session %s: goal=%s", sess.ID, req.Goal)
+	}
 
 	// Load autonomous system prompt
 	promptPath := "prompts/autonomous_agent.txt"
@@ -57,19 +90,32 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 
 	// Replace placeholders
 	autonomousPrompt := string(data)
-	autonomousPrompt = strings.ReplaceAll(autonomousPrompt, "{GOAL_DESCRIPTION}", req.Goal)
+
+	// Build goal description (don't include file content in system prompt anymore)
+	goalDescription := req.Goal
+	if req.File != nil && filePath != "" {
+		goalDescription += fmt.Sprintf("\n\n📎 FILE AVAILABLE: %s (%d bytes) at path: %s", req.File.Name, req.File.Size, filePath)
+		goalDescription += "\nYou can use standard command-line tools (cat, grep, jq, awk, etc.) to analyze this file."
+	}
+
+	autonomousPrompt = strings.ReplaceAll(autonomousPrompt, "{GOAL_DESCRIPTION}", goalDescription)
 	autonomousPrompt = strings.ReplaceAll(autonomousPrompt, "{ITERATION_HISTORY}", "No previous attempts yet.")
 
 	// Update system prompt
 	systemPrompt = autonomousPrompt
 	systemPromptName = "autonomous_agent.txt"
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{
+	response := map[string]interface{}{
 		"sessionId": sess.ID,
 		"status":    "autonomous_mode_active",
 		"message":   fmt.Sprintf("Autonomous mode activated. Goal: %s", req.Goal),
 		"goal":      req.Goal,
-	})
+	}
+	if filePath != "" {
+		response["filePath"] = filePath
+		response["fileName"] = req.File.Name
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // handleAutonomousStop deactivates autonomous mode for a session
@@ -108,9 +154,21 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 		systemPromptName = "default"
 	}
 
+	// Clean up temp file if exists
+	if sess.AttachedFilePath != "" {
+		tempDir := filepath.Join("/tmp", "owrap_autonomous_files", sess.ID)
+		if err := os.RemoveAll(tempDir); err != nil {
+			log.Printf("[AUTONOMOUS] Warning: failed to clean up temp dir: %v", err)
+		} else {
+			log.Printf("[AUTONOMOUS] Cleaned up temp directory: %s", tempDir)
+		}
+	}
+
 	// Deactivate autonomous mode
 	sess.AutonomousMode = false
 	sess.AutonomousGoal = ""
+	sess.AttachedFile = nil
+	sess.AttachedFilePath = ""
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"sessionId": sess.ID,
