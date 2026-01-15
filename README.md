@@ -185,7 +185,7 @@ Docker image is available for both architectures/platforms `linux/amd64` and `li
 
 Allowed commands to use in owrap are [here](./comm.go). **NOT** all of them are included in docker image.
 
-**env vars** are the same (defined [here](#-quickstart)) e.g. `OLLAMA_URL`, `OLLAMA_MODEL`.
+**env vars** are the same `OLLAMA_URL`, `OLLAMA_MODEL` etc.
 
 ```
 $ docker run -d --rm \
