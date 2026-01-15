@@ -19,8 +19,11 @@ COPY --chown=dummy banner.go banner.go
 COPY --chown=dummy comm.go comm.go
 COPY --chown=dummy help.go help.go
 COPY --chown=dummy vars.go vars.go
+COPY --chown=dummy autonomous.go autonomous.go
+
 COPY --chown=dummy go.mod go.mod
 COPY --chown=dummy go.sum go.sum
+
 COPY --chown=dummy utils utils
 COPY --chown=dummy webstatic webstatic
 COPY --chown=dummy prompts prompts

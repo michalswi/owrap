@@ -125,6 +125,22 @@
   <main>
     <!-- <h2>owrapUI</h2> -->
 
+    <!-- Autonomous Mode Goal Display -->
+    <div id="autonomousGoalBanner" style="display: none; margin-bottom: 12px; padding: 12px 16px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(219, 39, 119, 0.15)); border: 2px solid rgba(236, 72, 153, 0.4); border-radius: 12px;">
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
+        <span style="font-size: 20px;">🤖</span>
+        <div style="flex: 1;">
+          <div style="font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 4px;">AUTONOMOUS MODE ACTIVE</div>
+          <div style="font-size: 13px; color: var(--text);"><strong>Goal:</strong> <span id="autonomousGoalText">-</span></div>
+        </div>
+      </div>
+      <!-- Active Jobs Display -->
+      <div id="activeJobsContainer" style="display: none; margin-top: 8px; padding: 8px; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--accent-2); margin-bottom: 4px;">Background Jobs:</div>
+        <div id="activeJobsList" style="font-size: 11px; color: var(--muted);"></div>
+      </div>
+    </div>
+
     <div style="margin-bottom: 12px; padding: 10px 14px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px; font-size: 13px; color: var(--muted);">
       ℹ️ <strong>Note:</strong> Sessions are not saved by default. Use the <strong>/save</strong> button to save your current session.
     </div>
@@ -150,6 +166,10 @@
         <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
         <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
         <button id="showLast" type="button">/last</button>
+      </div>
+      <div class="stack" style="justify-content: center; margin-top: 10px;">
+        <button id="autonomousStart" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🤖 /autostart</button>
+        <button id="autonomousStop" type="button" style="background: linear-gradient(135deg, #64748b, #475569); display: none;">⏹️ /autostop</button>
       </div>
       <div style="text-align: center; margin-top: 4px;">
         <span id="fileName" class="file-name"></span>
@@ -239,6 +259,8 @@
     const listBtn = document.getElementById('listSessions');
     const autoOnBtn = document.getElementById('autoOn');
     const autoOffBtn = document.getElementById('autoOff');
+    const autonomousStartBtn = document.getElementById('autonomousStart');
+    const autonomousStopBtn = document.getElementById('autonomousStop');
     const modelEl = document.getElementById('model');
     const promptEl = document.getElementById('prompt');
     const versionEl = document.getElementById('version');
@@ -258,6 +280,10 @@
     const fileUpload = document.getElementById('fileUpload');
     const fileNameDisplay = document.getElementById('fileName');
     const fileUploadInfo = document.getElementById('fileUploadInfo');
+    const autonomousGoalBanner = document.getElementById('autonomousGoalBanner');
+    const autonomousGoalText = document.getElementById('autonomousGoalText');
+    const activeJobsContainer = document.getElementById('activeJobsContainer');
+    const activeJobsList = document.getElementById('activeJobsList');
     const statsEls = {
       userMsgs: document.getElementById('statUserMessages'),
       assistantMsgs: document.getElementById('statAssistantMessages'),
@@ -274,6 +300,12 @@
     let restoringState = false;
     let lastResponseTime = null;
     let pendingFile = null;
+    let lastUserMessage = ''; // Track last user message for UI feedback
+    let isAutonomousActive = false; // Track if autonomous mode is currently running
+    let isRequestInProgress = false; // Track if a sendText request is in progress
+    let stopRequested = false; // Track if user clicked /autostop
+    let showStopMessageAfterResponse = false; // Track if we need to show stop message after response displays
+    let restoredPromptName = ''; // Store the restored prompt name for display after response
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -305,6 +337,8 @@
     myPromptsBtn.addEventListener('click', showMyPrompts);
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
+    autonomousStartBtn.addEventListener('click', showAutonomousStartDialog);
+    autonomousStopBtn.addEventListener('click', stopAutonomousMode);
     fileUploadInfo.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -312,13 +346,14 @@
     });
 
     function showMyPrompts() {
-      // Extract all user messages from the log
+      // Extract all user messages from the log, excluding autonomous mode messages
       const logLines = logEl.querySelectorAll('.log-line');
       const userPrompts = [];
       
       logLines.forEach(line => {
         const userLabel = line.querySelector('.label-user');
-        if (userLabel) {
+        // Skip if it has the data-skip-myprompts attribute
+        if (userLabel && !line.hasAttribute('data-skip-myprompts')) {
           // Extract text after "You: "
           const fullText = line.textContent;
           const promptText = fullText.replace(/^You:\s*/, '').trim();
@@ -685,11 +720,11 @@
         const data = await res.json();
         if (data.ready) {
           ollamaStatusLight.className = 'status-light ready';
-          ollamaStatusText.textContent = 'ready';
+          ollamaStatusText.textContent = 'modelReady';
           ollamaStatusLight.title = 'Ollama is ready';
         } else {
           ollamaStatusLight.className = 'status-light not-ready';
-          ollamaStatusText.textContent = 'not ready';
+          ollamaStatusText.textContent = 'modelNotReady';
           ollamaStatusLight.title = data.error || 'Ollama is not responding';
         }
       } catch (e) {
@@ -761,14 +796,19 @@
       await sendText(apiText, true, displayText);
     }
 
-    async function sendText(text, fromInput = false, displayText = null) {
+    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false) {
       if (!text) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
+      isRequestInProgress = true;
       setSending(true);
       appendSeparator();
-      appendLine(`You: ${displayText || text}`, 'user');
+      appendLine(`You: ${displayText || text}`, 'user', skipMyPrompts);
+      
+      // Track last user message for UI feedback
+      lastUserMessage = text;
+      
       const startTime = performance.now();
       try {
         const res = await fetch('/api/chat', {
@@ -790,6 +830,7 @@
           appendLine(`Error: ${res.status}`, 'error');
         } else {
           const data = await res.json();
+          console.log('Response data:', data); // Debug log
           sessionId = data.sessionId;
           sessionEl.textContent = `session: ${sessionId}`;
           
@@ -817,8 +858,29 @@
           } else if (data.action === 'run_command') {
             appendLine(`Assistant [Running]: ${data.command}`, 'assistant');
             appendLine('[Command output]:', 'assistant');
-            appendLine(data.commandOutput || '(no output)', 'command');
+            const output = data.commandOutput || '(no output)';
+            appendLine(output, 'command');
+            
+            // Detect errors and show helpful message in autonomous mode
+            if (data.autonomousMode && (output.includes('Error running command') || output.includes('stderr:') || output.includes('exit status'))) {
+              appendLine('⚠️  Command failed, but agent will learn and try a different approach...', 'plain');
+            }
+            
+            // Display summary if present (autonomous mode generates summaries with 📝 emoji)
             if (data.assistantText) {
+              // Check for summary marker
+              const summaryMarker = '📝';
+              if (data.assistantText.includes(summaryMarker)) {
+                // Extract and display summary
+                const parts = data.assistantText.split('\n\n');
+                for (const part of parts) {
+                  if (part.includes(summaryMarker)) {
+                    appendLine(part, 'assistant');
+                  }
+                }
+              }
+              
+              // Check for analysis marker (non-autonomous mode)
               const marker = '\n\nAnalysis:\n';
               const idx = data.assistantText.indexOf(marker);
               if (idx !== -1) {
@@ -830,20 +892,99 @@
               }
             }
           }
-          if (data.assistantText && data.action !== 'run_command') {
+          
+          // Display update_findings action
+          if (data.action === 'update_findings' && data.assistantText) {
+            appendLine(data.assistantText, 'assistant');
+          } else if (data.assistantText && data.action !== 'run_command') {
             appendLine(`Assistant: ${data.assistantText}`, 'assistant');
           }
+          
+          // Show command count in autonomous mode
+          if (data.autonomousMode && data.commandCount) {
+            const isReview = data.commandCount % 3 === 0;
+            const countMsg = `📊 Commands executed: ${data.commandCount}${isReview ? ' (Goal review triggered)' : ''}`;
+            appendLine(countMsg, 'plain');
+          }
+          
           if (lastResponseTime) {
             appendLine(`⏱️  Response time: ${lastResponseTime}s`, 'plain');
           }
+          
+          // Update background jobs display
+          if (data.jobs && data.jobs.length > 0) {
+            activeJobsContainer.style.display = 'block';
+            let jobsHtml = '';
+            data.jobs.forEach(job => {
+              const status = job.Status === 'running' 
+                ? `⏳ running (${Math.round((Date.now() - new Date(job.StartTime)) / 1000)}s)`
+                : job.Status === 'completed' ? '✅ completed' : '❌ ' + job.Status;
+              jobsHtml += `<div>${job.ID}: ${job.Command} [${status}]</div>`;
+            });
+            activeJobsList.innerHTML = jobsHtml;
+          } else if (data.jobId) {
+            // Single job from run_command_bg or check_job
+            activeJobsContainer.style.display = 'block';
+            const status = data.jobStatus === 'running' ? '⏳ running' : data.jobStatus;
+            activeJobsList.innerHTML = `<div>${data.jobId}: ${data.command || 'job'} [${status}]</div>`;
+          }
+          
           modelEl.textContent = `model: ${data.model}`;
           if (data.stats) {
             renderStats(data.stats);
+          }
+          
+          // Auto-continue autonomous loop
+          if (data.autonomousContinue && !stopRequested) {
+            appendSeparator();
+            if (data.action === 'error') {
+              // Error message already includes retry count from backend
+              appendLine(data.assistantText, 'error');
+              setTimeout(() => {
+                sendText('retry', false, null, true); // skipMyPrompts=true - Trigger retry with error feedback already in messages
+              }, 1500);
+            } else {
+              // Show different message based on goal review cycle
+              const userMessage = lastUserMessage.toLowerCase();
+              if (userMessage.includes('goal review') || userMessage.includes('🎯')) {
+                appendLine('🎯 Goal review in progress...', 'plain');
+              } else {
+                appendLine('🔄 Continuing autonomous loop...', 'plain');
+              }
+              setTimeout(() => {
+                sendText('next step', false, null, true); // skipMyPrompts=true
+              }, 1500);
+            }
+          } else if (isAutonomousActive && !data.autonomousMode && data.action === 'answer') {
+            // Agent provided final answer and stopped autonomous mode
+            appendSeparator();
+            appendLine('🏁 Goal achieved! Autonomous mode stopped.', 'plain');
+            // Hide autonomous banner and trigger stop
+            autonomousGoalBanner.style.display = 'none';
+            autonomousStartBtn.style.display = 'inline-flex';
+            autonomousStopBtn.style.display = 'none';
+            enableAllButtons(); // Re-enable all buttons
+            isAutonomousActive = false; // Reset flag
+          } else if (data.autonomousMode && !data.autonomousContinue) {
+            appendSeparator();
+            appendLine('🏁 Autonomous loop complete (max iterations reached or goal achieved)', 'plain');
           }
         }
       } catch (e) {
         appendLine('Network error: ' + e, 'error');
       } finally {
+        isRequestInProgress = false;
+        
+        // Show stop message after response if stop was requested during this request
+        if (showStopMessageAfterResponse) {
+          appendSeparator();
+          appendLine('⏹️ Autonomous mode STOPPED', 'assistant');
+          appendLine(`System prompt restored to: ${restoredPromptName}`, 'assistant');
+          appendSeparator();
+          showStopMessageAfterResponse = false;
+          restoredPromptName = ''; // Reset
+        }
+        
         setSending(false);
         if (fromInput) msgEl.value = '';
         msgEl.focus();
@@ -857,7 +998,7 @@
       sendSpinner.setAttribute('aria-hidden', (!active).toString());
     }
 
-    function appendLine(text, kind = 'plain') {
+    function appendLine(text, kind = 'plain', skipMyPrompts = false) {
       let prefix = '';
       let body = text;
       if (kind === 'user' || kind === 'assistant') {
@@ -880,7 +1021,8 @@
       const safePrefix = escapeHtml(prefix);
       const labelHtml = labelCls ? `<span class="${labelCls}">${safePrefix}</span>` : safePrefix;
       const renderedBody = ansiToHtml(body);
-      logEl.insertAdjacentHTML('beforeend', `<div class="log-line ${cls}">${labelHtml}${renderedBody}</div>`);
+      const skipAttr = skipMyPrompts ? ' data-skip-myprompts="true"' : '';
+      logEl.insertAdjacentHTML('beforeend', `<div class="log-line ${cls}"${skipAttr}>${labelHtml}${renderedBody}</div>`);
       logEl.scrollTop = logEl.scrollHeight;
     }
 
@@ -994,6 +1136,290 @@
     function rgbToHex(r, g, b) {
       const toHex = v => v.toString(16).padStart(2, '0');
       return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+    }
+
+    function showAutonomousStartDialog() {
+      const bodyHtml = `
+        <div class="modal-subtitle">Define your goal - the agent will work continuously until it's done</div>
+        
+        <div style="margin-top: 16px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">Goal:</label>
+          <textarea id="autoGoalInput" placeholder="Example: Check the weather for Wrocław on the website wttr.in and create a report." style="min-height: 120px; font-size: 13px;"></textarea>
+        </div>
+        
+        <div style="margin-top: 16px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">📎 Attach file (optional):</label>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button id="autoFileUploadBtn" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed); padding: 8px 16px;">Choose File</button>
+            <span id="autoFileInfo" style="font-size:12px; color:var(--muted);">No file selected</span>
+            <input type="file" id="autoFileInput" accept="*/*" style="display:none;" />
+          </div>
+          <div style="margin-top:6px; font-size:11px; color:var(--muted);">Useful for providing context, data, or reference material for the autonomous task</div>
+        </div>
+        
+        <div style="margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; font-size: 12px; color: var(--muted);">
+          ⚠️ <strong>Autonomous Mode:</strong> Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
+        </div>
+        
+        <div style="margin-top: 16px; display: flex; gap: 10px;">
+          <button id="startAutonomousConfirm" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🚀 Start Autonomous Work</button>
+          <button id="startAutonomousCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+        </div>
+      `;
+      
+      showModal('🤖 Start Autonomous Mode', bodyHtml);
+      
+      const goalInput = document.getElementById('autoGoalInput');
+      const confirmBtn = document.getElementById('startAutonomousConfirm');
+      const cancelBtn = document.getElementById('startAutonomousCancel');
+      const fileUploadBtn = document.getElementById('autoFileUploadBtn');
+      const fileInput = document.getElementById('autoFileInput');
+      const fileInfo = document.getElementById('autoFileInfo');
+      
+      let autonomousFile = null;
+      
+      goalInput.focus();
+      
+      // Handle file selection
+      fileUploadBtn.addEventListener('click', () => {
+        fileInput.click();
+      });
+      
+      fileInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        fileInfo.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Loading...`;
+        fileInfo.style.color = 'var(--accent-2)';
+        
+        try {
+          const content = await readFileContent(file);
+          autonomousFile = {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            content: content
+          };
+          console.log('File attached:', { name: file.name, size: file.size, contentLength: content?.length || 0 });
+          fileInfo.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Ready`;
+          fileInfo.style.color = 'var(--success)';
+        } catch (err) {
+          console.error('Error reading file:', err);
+          fileInfo.textContent = `❌ Error reading file: ${err.message}`;
+          fileInfo.style.color = '#ef4444';
+          autonomousFile = null;
+        }
+      });
+      
+      const doStart = async () => {
+        const goal = goalInput.value.trim();
+        
+        if (!goal) {
+          goalInput.style.borderColor = '#ef4444';
+          return;
+        }
+        
+        closeModal();
+        await startAutonomousMode(goal, autonomousFile);
+      };
+      
+      confirmBtn.addEventListener('click', doStart);
+      cancelBtn.addEventListener('click', closeModal);
+      
+      goalInput.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+          e.preventDefault();
+          doStart();
+        }
+      });
+    }
+
+    async function startAutonomousMode(goal, file = null) {
+      try {
+        const requestBody = { sessionId, goal };
+        
+        // Include file if provided
+        if (file) {
+          console.log('Sending file with autonomous start:', { name: file.name, size: file.size, hasContent: !!file.content });
+          requestBody.file = {
+            name: file.name,
+            size: file.size,
+            type: file.type,
+            content: file.content
+          };
+        } else {
+          console.log('No file attached to autonomous start');
+        }
+        
+        const res = await fetch('/api/autonomous/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody)
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+          appendLine(`❌ Failed to start autonomous mode: ${data.error || 'Unknown error'}`, 'error');
+          return;
+        }
+        
+        // CRITICAL: Update sessionId to match the one from autonomous start
+        sessionId = data.sessionId;
+        sessionEl.textContent = `session: ${sessionId}`;
+        console.log('Autonomous mode started with sessionId:', sessionId);
+        
+        // Store file path if file was attached
+        const attachedFilePath = data.filePath || null;
+        const attachedFileName = data.fileName || null;
+        
+        // Update UI
+        autonomousStartBtn.style.display = 'none';
+        autonomousStopBtn.style.display = 'inline-flex';
+        promptEl.textContent = 'sys-prompt: autonomous_agent.txt';
+        disableAllButtons(); // Disable all other buttons
+        isAutonomousActive = true; // Set flag
+        stopRequested = false; // Reset stop flag
+        
+        // Show and update autonomous goal banner
+        autonomousGoalBanner.style.display = 'block';
+        autonomousGoalText.textContent = goal;
+        
+        appendSeparator();
+        appendLine('🤖 Autonomous mode ACTIVATED', 'assistant');
+        appendLine(`Goal: ${goal}`, 'assistant');
+        if (attachedFilePath) {
+          appendLine(`📎 File available: ${attachedFileName} at ${attachedFilePath}`, 'assistant');
+        }
+        appendSeparator();
+        appendLine('💡 Starting autonomous work...', 'assistant');
+        appendSeparator();
+        saveState();
+        
+        // Automatically start the first iteration
+        setTimeout(() => {
+          let firstMessage = 'start working on the goal';
+          
+          // If file was attached, inform agent of the file path
+          if (attachedFilePath) {
+            firstMessage = `start working on the goal. The file "${attachedFileName}" is available at: ${attachedFilePath}. Use it as needed.`;
+          }
+          
+          sendText(firstMessage, false, null, true); // skipMyPrompts=true
+        }, 1000);
+        
+      } catch (err) {
+        appendLine(`❌ Error starting autonomous mode: ${err.message}`, 'error');
+      }
+    }
+
+    async function stopAutonomousMode() {
+      try {
+        // Set flag to prevent auto-continue from triggering
+        stopRequested = true;
+        
+        // Show immediate feedback if request is in progress
+        if (isRequestInProgress) {
+          appendSeparator();
+          appendLine('⏳ Stopping autonomous mode... (waiting for current request to complete)', 'plain');
+          showStopMessageAfterResponse = true; // Show stop message after request completes
+        }
+        
+        // Wait for any pending request to complete
+        let waitCount = 0;
+        while (isRequestInProgress && waitCount < 100) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          waitCount++;
+        }
+        
+        const res = await fetch('/api/autonomous/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+          appendLine(`❌ Failed to stop autonomous mode: ${data.error || 'Unknown error'}`, 'error');
+          return;
+        }
+        
+        // Store prompt name for later display
+        restoredPromptName = data.prompt;
+        
+        // Update UI
+        autonomousStartBtn.style.display = 'inline-flex';
+        autonomousStopBtn.style.display = 'none';
+        autonomousGoalBanner.style.display = 'none';
+        enableAllButtons(); // Re-enable all buttons
+        isAutonomousActive = false; // Reset flag
+        
+        // Only show stop message immediately if no request was in progress
+        if (!showStopMessageAfterResponse) {
+          appendSeparator();
+          appendLine('⏹️ Autonomous mode STOPPED', 'assistant');
+          appendLine(`System prompt restored to: ${data.prompt}`, 'assistant');
+          appendSeparator();
+        }
+        
+        // Refresh prompt info
+        await fetchPrompt();
+        saveState();
+        
+      } catch (err) {
+        appendLine(`❌ Error stopping autonomous mode: ${err.message}`, 'error');
+      }
+    }
+
+    function disableAllButtons() {
+      // Disable all buttons except /autostop
+      promptBtn.disabled = true;
+      editPromptBtn.disabled = true;
+      helpBtn.disabled = true;
+      myPromptsBtn.disabled = true;
+      lastBtn.disabled = true;
+      clearBtn.disabled = true;
+      saveBtn.disabled = true;
+      loadBtn.disabled = true;
+      listBtn.disabled = true;
+      autoOnBtn.disabled = true;
+      autoOffBtn.disabled = true;
+      document.querySelector('.file-upload-btn').disabled = true;
+      fileUpload.disabled = true;
+      
+      // Apply disabled styling
+      const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+      buttons.forEach(btn => {
+        btn.style.opacity = '0.5';
+        btn.style.cursor = 'not-allowed';
+      });
+    }
+
+    function enableAllButtons() {
+      // Re-enable all buttons
+      promptBtn.disabled = false;
+      editPromptBtn.disabled = false;
+      helpBtn.disabled = false;
+      myPromptsBtn.disabled = false;
+      lastBtn.disabled = false;
+      clearBtn.disabled = false;
+      saveBtn.disabled = false;
+      loadBtn.disabled = false;
+      listBtn.disabled = false;
+      autoOnBtn.disabled = false;
+      autoOffBtn.disabled = false;
+      document.querySelector('.file-upload-btn').disabled = false;
+      fileUpload.disabled = false;
+      
+      // Remove disabled styling
+      const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+      buttons.forEach(btn => {
+        btn.style.opacity = '';
+        btn.style.cursor = '';
+      });
     }
 
     function escapeHtml(str) {
