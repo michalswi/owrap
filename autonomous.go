@@ -196,12 +196,8 @@ func buildIterationHistory(sess *webSession) string {
 		if msg.Role == "user" {
 			history.WriteString(fmt.Sprintf("User: %s\n", msg.Content))
 		} else if msg.Role == "assistant" {
-			// Truncate long outputs
-			content := msg.Content
-			if len(content) > 200 {
-				content = content[:200] + "..."
-			}
-			history.WriteString(fmt.Sprintf("Assistant: %s\n", content))
+			// No truncation - local model, no token costs
+			history.WriteString(fmt.Sprintf("Assistant: %s\n", msg.Content))
 		}
 	}
 
