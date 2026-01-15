@@ -24,8 +24,8 @@
 - Maintains session logs (user/assistant messages, statistics) in memory with `/save` and `/load` support for `/tmp/sessions`
 - Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
 - Supports **file uploads** in web UI - upload text/code files for one-time analysis with custom prompts
-- Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button)
-- [beta version] Features **autonomous mode** in web UI - agent continuously works toward user-defined goals, executing commands, analyzing files, collecting information, and generating reports until completion. Supports optional file attachments as reference/knowledge base (files are stored in `/tmp/owrap_autonomous_files/`)
+- Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button). More [here](#-system-prompts)
+- [beta version] Features **autonomous mode** in web UI - agent continuously works toward user-defined goals, executing commands, analyzing files, collecting information, and generating reports until completion. Supports optional file attachments as reference/knowledge base. More [here](#-autonomous-mode)
 
 **owrap** is available in two modes (*terminal* and *web UI*) and as a Docker image: `michalsw/owrap:latest` (all descriptions below).
 
@@ -219,25 +219,15 @@ The system prompt defines the assistant's behavior and capabilities. The default
 
 **Creating custom prompts**: Create a `.txt` file in the `./prompts/` directory with your instructions. The prompt should define the assistant's role, capabilities, and response format
 
-## \# Autonomous Mode [beta version]
+## \# Autonomous Mode
 
-**[Web UI Only]**
+**Web UI Only** [beta version]
 
 Autonomous mode enables the AI agent to work continuously and independently toward a user-defined goal until completion or manual stop. Unlike regular chat mode where each message requires user input, autonomous mode operates in a self-directed loop.
 
-Works **best** with larger models (more parameters) !
+Works **best** with larger models (more parameters), tested with `gemma3:12b` and `mistral:7b`.  
 
-**Key Features:**
-- **Goal-Oriented**: Define a high-level objective (e.g., "analyze the network security of domain.com and create a detailed report")
-- **Continuous Operation**: Agent executes commands, analyzes results, and plans next steps automatically without user intervention
-- **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
-- **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
-  - Files are saved to `/tmp/owrap_autonomous_files/<sessionId>/`
-  - Agent can use command-line tools (cat, grep, jq, awk, etc.) to analyze attached files
-  - Useful for tasks like "analyze this log file and identify errors" or "create a report based on this configuration"
-- **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
-- **Auto-Stop**: Automatically stops when goal is achieved or proven impossible
-- **Manual Control**: `/autostop` button available for manual interruption at any time
+Because it's **beta version** it would require more work to improve the way how models achieve defined goals [inprogress].
 
 **How to Use:**
 1. Click `/autostart` button in web UI
@@ -253,6 +243,18 @@ Works **best** with larger models (more parameters) !
 - Data processing: "Extract all email addresses from this document and save them to a file"
 - Research: "Research Azure Firewall features using the attached documentation and create a deployment guide"
 - Multi-step tasks: "Check website availability, analyze SSL certificate, test DNS records, and generate security report"
+
+**Key Features:**
+- **Goal-Oriented**: Define a high-level objective (e.g., "analyze the network security of domain.com and create a detailed report")
+- **Continuous Operation**: Agent executes commands, analyzes results, and plans next steps automatically without user intervention
+- **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
+- **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
+  - Files are saved to `/tmp/owrap_autonomous_files/<sessionId>/`
+  - Agent can use command-line tools (cat, grep, jq, awk, etc.) to analyze attached files
+  - Useful for tasks like "analyze this log file and identify errors" or "create a report based on this configuration"
+- **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
+- **Auto-Stop**: Automatically stops when goal is achieved or proven impossible
+- **Manual Control**: `/autostop` button available for manual interruption at any time
 
 **Notes:**
 - All actions are logged and can be reviewed during execution
