@@ -34,12 +34,15 @@ var webBindDefault = utils.GetEnv("WEB_BIND", ":8080")
 var sessionMessages []ChatMessage
 var cachedBlocks []string
 var autoAnalyze bool
+var thinkingEnabled bool
 var startTime time.Time
 
 const webHelpText = `Web UI commands:
 /myprompts     Show all your prompts from current session (click to reuse)
 /auto-on       Enable automatic analysis after commands
 /auto-off      Disable automatic analysis after commands
+/think-on      Enable model reasoning for subsequent requests
+/think-off     Disable model reasoning (default)
 /save [NAME]   Save current session to ~/.owrap/sessions (auto-named if NAME omitted)
 /load NAME     Load a saved session by name
 /sessions      List all saved sessions in ~/.owrap/sessions

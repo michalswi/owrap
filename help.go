@@ -99,6 +99,14 @@ func handleSlashCommand(input string, stats *Stats) bool {
 		autoAnalyze = false
 		fmt.Println(info("Auto-analysis disabled."))
 		return true
+	case "/think-on":
+		thinkingEnabled = true
+		fmt.Println(success("Thinking enabled for subsequent requests."))
+		return true
+	case "/think-off":
+		thinkingEnabled = false
+		fmt.Println(info("Thinking disabled."))
+		return true
 	case "/editsysprompt":
 		handleEditSystemPrompt()
 		return true
@@ -131,6 +139,8 @@ func printHelp() {
 	fmt.Println("  /use N         Send cached block #N (1-based) with optional question")
 	fmt.Println("  /auto-on       LLM auto-analyzes command output after execution")
 	fmt.Println("  /auto-off      [default] No LLM auto-analysis after command execution")
+	fmt.Println("  /think-on      Ask supported models to return reasoning")
+	fmt.Println("  /think-off     [default] Disable model reasoning")
 	fmt.Println("  /execfile P    Execute each non-empty line in file P (no analysis)")
 	fmt.Println(accent("Model-run allowed commands:"))
 	fmt.Printf("  [%s]\n", strings.Join(allowedCommandsList(), ", "))

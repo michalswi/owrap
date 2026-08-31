@@ -228,6 +228,9 @@
     .log-assistant, .label-assistant { color: #76d991; }
     .log-command { color: #67c8ff; }
     .log-plain, :root[data-theme="light"] #log .log-plain { color: var(--terminal-text); }
+    .thinking-block { margin: 6px 0 8px 14px; color: var(--muted); font-family: inherit; font-size: 12px; line-height: 1.65; }
+    .thinking-block summary { cursor: pointer; color: var(--accent-2); font-family: inherit; font-size: inherit; line-height: inherit; font-weight: 700; }
+    .thinking-content { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); white-space: pre-wrap; font-family: inherit; font-size: inherit; line-height: inherit; }
     .log-sep { margin: 12px 0; border-bottom: 1px solid #343840; opacity: 1; }
     .panel { padding: 13px; }
     .panel-heading { margin: 0 0 11px; color: var(--text); font-size: 11px; font-weight: 650; text-transform: uppercase; }
@@ -609,6 +612,9 @@
               <button id="showHelp" type="button">/help</button>
               <button id="autoOn" type="button">Analysis on</button>
               <button id="autoOff" type="button">Analysis off</button>
+              <button id="thinkOn" type="button">Thinking on</button>
+              <button id="thinkOff" type="button">Thinking off</button>
+              <span id="thinkingState" class="composer-hint">Thinking: off</span>
               <button id="autonomousStart" type="button">Start autonomous</button>
               <button id="autonomousStop" type="button" style="display: none;">Stop autonomous</button>
             </div>
@@ -680,6 +686,9 @@
     const listBtn = document.getElementById('listSessions');
     const autoOnBtn = document.getElementById('autoOn');
     const autoOffBtn = document.getElementById('autoOff');
+    const thinkOnBtn = document.getElementById('thinkOn');
+    const thinkOffBtn = document.getElementById('thinkOff');
+    const thinkingStateEl = document.getElementById('thinkingState');
     const autonomousStartBtn = document.getElementById('autonomousStart');
     const autonomousStopBtn = document.getElementById('autonomousStop');
     const modelEl = document.getElementById('model');
@@ -733,6 +742,7 @@
     let stopRequested = false; // Track if user clicked /autostop
     let showStopMessageAfterResponse = false; // Track if we need to show stop message after response displays
     let restoredPromptName = ''; // Store the restored prompt name for display after response
+    let thinkingEnabled = false;
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -767,6 +777,8 @@
     myPromptsBtn.addEventListener('click', showMyPrompts);
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
+    thinkOnBtn.addEventListener('click', () => sendText('/think-on'));
+    thinkOffBtn.addEventListener('click', () => sendText('/think-off'));
     autonomousStartBtn.addEventListener('click', showAutonomousStartDialog);
     autonomousStopBtn.addEventListener('click', stopAutonomousMode);
     fileUploadInfo.addEventListener('click', (e) => {
@@ -978,6 +990,7 @@
           appendSeparator();
           appendLine(`You: ${message.content}`, 'user');
         } else if (message.role === 'assistant') {
+          appendThinking(message.thinking);
           appendLine(`Assistant: ${message.content}`, 'assistant');
         }
       }
@@ -995,6 +1008,7 @@
         renderStats(state.stats || emptyStats, true);
         if (state.model) modelEl.textContent = `model: ${state.model}`;
         if (state.prompt) promptEl.textContent = `sys-prompt: ${state.prompt}`;
+        setThinkingState(Boolean(state.thinking));
         restoringState = false;
         saveState();
         return true;
@@ -1294,6 +1308,7 @@
           console.log('Response data:', data); // Debug log
           sessionId = data.sessionId;
           sessionEl.textContent = `session: ${sessionId}`;
+          if (typeof data.thinkingEnabled === 'boolean') setThinkingState(data.thinkingEnabled);
           
           // Handle session_loaded action - clear log and display all messages
           if (data.action === 'session_loaded') {
@@ -1308,6 +1323,7 @@
                 appendSeparator();
                 appendLine(`You: ${msg.content}`, 'user');
               } else if (msg.role === 'assistant') {
+                appendThinking(msg.thinking);
                 appendLine(`Assistant: ${msg.content}`, 'assistant');
               }
             }
@@ -1355,6 +1371,7 @@
           }
           
           // Display update_findings action
+          appendThinking(data.thinking);
           if (data.action === 'update_findings' && data.assistantText) {
             appendLine(data.assistantText, 'assistant');
           } else if (data.assistantText && data.action !== 'run_command') {
@@ -1491,6 +1508,19 @@
       const skipAttr = skipMyPrompts ? ' data-skip-myprompts="true"' : '';
       logEl.insertAdjacentHTML('beforeend', `<div class="log-line ${cls}"${skipAttr}>${labelHtml}${renderedBody}</div>`);
       logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function appendThinking(thinking) {
+      if (!thinking) return;
+      logEl.insertAdjacentHTML('beforeend', `<details class="thinking-block"><summary>Model reasoning</summary><div class="thinking-content">${ansiToHtml(thinking)}</div></details>`);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setThinkingState(enabled) {
+      thinkingEnabled = enabled;
+      thinkingStateEl.textContent = `Thinking: ${enabled ? 'on' : 'off'}`;
+      thinkOnBtn.disabled = enabled;
+      thinkOffBtn.disabled = !enabled;
     }
 
     function appendSeparator() {

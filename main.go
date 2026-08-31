@@ -25,8 +25,9 @@ import (
 )
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	Thinking string `json:"thinking,omitempty"`
 }
 
 //go:embed webstatic/*
@@ -48,6 +49,7 @@ type webSession struct {
 	AttachedFile       *FileAttachment // File attached when starting autonomous mode
 	AttachedFilePath   string          // Temp path where file is stored on disk
 	AutoAnalyze        bool            // Per-session auto-analysis mode
+	ThinkingEnabled    bool            // Per-session Ollama thinking mode
 }
 
 type webSessionStore struct {
@@ -66,6 +68,7 @@ type webStateResponse struct {
 	Stats     Stats         `json:"stats"`
 	Model     string        `json:"model"`
 	Prompt    string        `json:"prompt"`
+	Thinking  bool          `json:"thinking"`
 }
 
 func newWebSessionStore() *webSessionStore {
@@ -253,6 +256,7 @@ func warn(s string) string    { return color.Format(color.RED, s) }
 func userLabel() string       { return color.Format(color.YELLOW, "You: ") }
 func assistantLabel() string  { return color.Format(color.GREEN, "Assistant:") }
 func analysisLabel() string   { return color.Format(color.GREEN, "Assistant (analysis):") }
+func thinkingLabel() string   { return color.Format(color.BLUE, "Assistant (thinking):") }
 func runningLabel() string    { return color.Format(color.BLUE, "[Running]:") }
 func outputLabel() string     { return color.Format(color.BLUE, "[Command output]:") }
 func separatorLine() string   { return color.Format(color.MINGLE, separator) }
@@ -262,6 +266,7 @@ type ChatRequest struct {
 	Messages []ChatMessage `json:"messages"`
 	Stream   bool          `json:"stream"`
 	Format   string        `json:"format,omitempty"` // "json" to force JSON output
+	Think    bool          `json:"think"`
 }
 
 type ChatResponse struct {
@@ -291,6 +296,8 @@ type webChatResponse struct {
 	Model              string           `json:"model"`
 	Timestamp          time.Time        `json:"timestamp"`
 	Stats              Stats            `json:"stats"`
+	Thinking           string           `json:"thinking,omitempty"`
+	ThinkingEnabled    bool             `json:"thinkingEnabled"`
 	AutonomousMode     bool             `json:"autonomousMode,omitempty"`
 	AutonomousContinue bool             `json:"autonomousContinue,omitempty"`
 	CommandCount       int              `json:"commandCount,omitempty"` // Commands executed in autonomous mode
@@ -336,7 +343,7 @@ func (s *Stats) recordMessage(message ChatMessage) {
 		s.TotalUserChars += len(message.Content)
 	case "assistant":
 		s.AssistantMessages++
-		s.TotalAssistantChars += len(message.Content)
+		s.TotalAssistantChars += len(message.Content) + len(message.Thinking)
 	}
 }
 
@@ -344,7 +351,7 @@ func (s *Stats) updateContext(systemPrompt string, messages []ChatMessage) {
 	contextChars := len(systemPrompt)
 	for _, message := range messages {
 		if message.Role != "system" {
-			contextChars += len(message.Content)
+			contextChars += len(message.Content) + len(message.Thinking)
 		}
 	}
 	s.ContextChars = contextChars
@@ -361,10 +368,17 @@ func (s *Stats) recordCommand(cmd string) {
 }
 
 func (s *webSession) appendMessage(role, content string) {
-	message := ChatMessage{Role: role, Content: content}
+	s.appendChatMessage(ChatMessage{Role: role, Content: content})
+}
+
+func (s *webSession) appendChatMessage(message ChatMessage) {
 	s.Messages = append(s.Messages, message)
 	s.Stats.recordMessage(message)
 	s.Stats.updateContext(systemPrompt, s.Messages)
+}
+
+func (s *webSession) appendAssistant(content, thinking string) {
+	s.appendChatMessage(ChatMessage{Role: "assistant", Content: content, Thinking: thinking})
 }
 
 func (s *webSession) appendContextMessage(role, content string) {
@@ -394,35 +408,41 @@ func callOllama(messages []ChatMessage, forceJSON bool) (string, error) {
 }
 
 func callOllamaContext(ctx context.Context, messages []ChatMessage, forceJSON bool) (string, error) {
+	message, err := callOllamaMessageContext(ctx, messages, forceJSON, thinkingEnabled)
+	return message.Content, err
+}
+
+func callOllamaMessageContext(ctx context.Context, messages []ChatMessage, forceJSON, think bool) (ChatMessage, error) {
 	reqBody := ChatRequest{
 		Model:    modelName,
 		Messages: messages,
 		Stream:   false,
+		Think:    think,
 	}
 	if forceJSON {
 		reqBody.Format = "json"
 	}
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(reqBody); err != nil {
-		return "", err
+		return ChatMessage{}, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ollamaURL, &buf)
 	if err != nil {
-		return "", err
+		return ChatMessage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", err
+		return ChatMessage{}, err
 	}
 	defer resp.Body.Close()
 
 	var cr ChatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&cr); err != nil {
-		return "", err
+		return ChatMessage{}, err
 	}
-	return cr.Message.Content, nil
+	return cr.Message, nil
 }
 
 func callOllamaWithLog(origin string, messages []ChatMessage, forceJSON bool) (string, error) {
@@ -439,6 +459,13 @@ func callOllamaWithLogContext(ctx context.Context, origin string, messages []Cha
 	}
 	log.Printf("[ollama][%s] messages=%d model=%s%s dur=%s err=%v", origin, len(messages), modelName, jsonMode, dur.Round(time.Millisecond), err)
 	return resp, err
+}
+
+func callOllamaMessageWithLogContext(ctx context.Context, origin string, messages []ChatMessage, forceJSON, think bool) (ChatMessage, error) {
+	start := time.Now()
+	message, err := callOllamaMessageContext(ctx, messages, forceJSON, think)
+	log.Printf("[ollama][%s] messages=%d model=%s json-mode=%v think=%v dur=%s err=%v", origin, len(messages), modelName, forceJSON, think, time.Since(start).Round(time.Millisecond), err)
+	return message, err
 }
 
 func runCommand(cmdStr string) string {
@@ -856,6 +883,7 @@ func handleWebState(w http.ResponseWriter, r *http.Request) {
 			Stats:     sess.Stats,
 			Model:     modelName,
 			Prompt:    systemPromptName,
+			Thinking:  sess.ThinkingEnabled,
 		})
 	case http.MethodDelete:
 		sess := webStore.reset()
@@ -870,6 +898,7 @@ func handleWebState(w http.ResponseWriter, r *http.Request) {
 			Stats:     sess.Stats,
 			Model:     modelName,
 			Prompt:    systemPromptName,
+			Thinking:  sess.ThinkingEnabled,
 		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1054,6 +1083,20 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 	lower := strings.ToLower(strings.TrimSpace(req.Message))
 	switch lower {
+	case "/think-on":
+		sess.ThinkingEnabled = true
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID: sess.ID, Action: "answer", AssistantText: "Thinking enabled for subsequent requests.",
+			Messages: sess.Messages, Model: modelName, Timestamp: time.Now().UTC(), Stats: sess.Stats, ThinkingEnabled: true,
+		})
+		return
+	case "/think-off":
+		sess.ThinkingEnabled = false
+		writeJSON(w, http.StatusOK, webChatResponse{
+			SessionID: sess.ID, Action: "answer", AssistantText: "Thinking disabled.",
+			Messages: sess.Messages, Model: modelName, Timestamp: time.Now().UTC(), Stats: sess.Stats, ThinkingEnabled: false,
+		})
+		return
 	case "/auto-on":
 		sess.AutoAnalyze = true
 		writeJSON(w, http.StatusOK, webChatResponse{
@@ -1272,12 +1315,13 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	// Force JSON mode only in autonomous mode
 	forceJSON := sess.AutonomousMode
 	requestStarted := time.Now()
-	raw, err := callOllamaWithLogContext(r.Context(), "web-chat:"+sess.ID, messages, forceJSON)
+	ollamaMessage, err := callOllamaMessageWithLogContext(r.Context(), "web-chat:"+sess.ID, messages, forceJSON, sess.ThinkingEnabled)
 	sess.Stats.recordResponseDuration(time.Since(requestStarted))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("ollama error: %v", err), http.StatusBadGateway)
 		return
 	}
+	raw := ollamaMessage.Content
 
 	clean := strings.TrimSpace(raw)
 
@@ -1310,16 +1354,18 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Non-autonomous mode: just show the raw output
-		sess.appendMessage("assistant", raw)
+		sess.appendAssistant(raw, ollamaMessage.Thinking)
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:     sess.ID,
-			Action:        "answer",
-			AssistantText: raw,
-			Raw:           raw,
-			Messages:      sess.Messages,
-			Model:         modelName,
-			Timestamp:     time.Now().UTC(),
-			Stats:         sess.Stats,
+			SessionID:       sess.ID,
+			Action:          "answer",
+			AssistantText:   raw,
+			Raw:             raw,
+			Messages:        sess.Messages,
+			Model:           modelName,
+			Timestamp:       time.Now().UTC(),
+			Stats:           sess.Stats,
+			Thinking:        ollamaMessage.Thinking,
+			ThinkingEnabled: sess.ThinkingEnabled,
 		})
 		return
 	}
@@ -1625,6 +1671,16 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 	case "answer":
 		response := handleAutonomousAnswer(sess, tool)
+		if ollamaMessage.Thinking != "" && len(sess.Messages) > 0 {
+			last := &sess.Messages[len(sess.Messages)-1]
+			last.Thinking = ollamaMessage.Thinking
+			sess.Stats.TotalAssistantChars += len(ollamaMessage.Thinking)
+			sess.Stats.updateContext(systemPrompt, sess.Messages)
+			response.Messages = sess.Messages
+			response.Stats = sess.Stats
+		}
+		response.Thinking = ollamaMessage.Thinking
+		response.ThinkingEnabled = sess.ThinkingEnabled
 		writeJSON(w, http.StatusOK, response)
 
 	default:
@@ -2040,11 +2096,15 @@ func main() {
 		appendTerminalMessage(&messages, stats, "user", userInput)
 
 		requestStarted := time.Now()
-		raw, err := callOllama(messages, false)
+		ollamaMessage, err := callOllamaMessageContext(context.Background(), messages, false, thinkingEnabled)
 		stats.recordResponseDuration(time.Since(requestStarted))
 		if err != nil {
 			fmt.Println(warn("Ollama error:"), err)
 			continue
+		}
+		raw := ollamaMessage.Content
+		if strings.TrimSpace(ollamaMessage.Thinking) != "" {
+			fmt.Println(thinkingLabel(), ollamaMessage.Thinking)
 		}
 
 		clean := strings.TrimSpace(raw)
@@ -2060,7 +2120,11 @@ func main() {
 		if err := json.Unmarshal([]byte(clean), &tool); err != nil {
 			// Model didn’t stick to JSON; just print raw
 			fmt.Println(assistantLabel(), raw)
-			appendTerminalMessage(&messages, stats, "assistant", raw)
+			message := ChatMessage{Role: "assistant", Content: raw, Thinking: ollamaMessage.Thinking}
+			messages = append(messages, message)
+			sessionMessages = append(sessionMessages, message)
+			stats.recordMessage(message)
+			stats.updateContext(systemPrompt, messages)
 			continue
 		}
 

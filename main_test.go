@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -31,6 +33,112 @@ func TestWebSessionAppendMessageUpdatesStatsAndContext(t *testing.T) {
 	}
 	if sess.Stats.EstimatedContextTokens != (wantContextChars+3)/4 {
 		t.Fatalf("EstimatedContextTokens = %d", sess.Stats.EstimatedContextTokens)
+	}
+}
+
+func TestCallOllamaThinkingProtocol(t *testing.T) {
+	tests := []struct {
+		name         string
+		think        bool
+		thinkingText string
+	}{
+		{name: "disabled by default"},
+		{name: "enabled with reasoning", think: true, thinkingText: "reasoning trace"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var received ChatRequest
+			ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Fatal(err)
+				}
+				_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: "answer", Thinking: test.thinkingText}})
+			}))
+			defer ollama.Close()
+
+			previousURL := ollamaURL
+			ollamaURL = ollama.URL
+			t.Cleanup(func() { ollamaURL = previousURL })
+
+			message, err := callOllamaMessageContext(context.Background(), []ChatMessage{{Role: "user", Content: "question"}}, false, test.think)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if received.Think != test.think {
+				t.Fatalf("request think = %v, want %v", received.Think, test.think)
+			}
+			if message.Thinking != test.thinkingText || message.Content != "answer" {
+				t.Fatalf("unexpected response message: %+v", message)
+			}
+		})
+	}
+}
+
+func TestWebThinkingToggleAndResponsePersistence(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var received ChatRequest
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{
+			Role: "assistant", Content: `{"action":"answer","text":"final answer"}`, Thinking: "reasoning trace",
+		}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	toggleResponse := httptest.NewRecorder()
+	handleWebChat(toggleResponse, httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(`{"message":"/think-on"}`)))
+	if toggleResponse.Code != http.StatusOK {
+		t.Fatalf("toggle status = %d", toggleResponse.Code)
+	}
+	var toggled webChatResponse
+	if err := json.Unmarshal(toggleResponse.Body.Bytes(), &toggled); err != nil {
+		t.Fatal(err)
+	}
+	if !toggled.ThinkingEnabled {
+		t.Fatal("thinking was not enabled")
+	}
+
+	chatResponse := httptest.NewRecorder()
+	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"question"}`, toggled.SessionID))
+	handleWebChat(chatResponse, httptest.NewRequest(http.MethodPost, "/api/chat", body))
+	var payload webChatResponse
+	if err := json.Unmarshal(chatResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !received.Think || payload.Thinking != "reasoning trace" || !payload.ThinkingEnabled {
+		t.Fatalf("thinking response not preserved: request=%+v response=%+v", received, payload)
+	}
+	if len(payload.Messages) != 2 || payload.Messages[1].Thinking != "reasoning trace" {
+		t.Fatalf("reasoning missing from messages: %+v", payload.Messages)
+	}
+
+	restartedStore := newWebSessionStore()
+	if err := restartedStore.load(); err != nil {
+		t.Fatal(err)
+	}
+	restored, ok := restartedStore.active()
+	if !ok || !restored.ThinkingEnabled || restored.Messages[1].Thinking != "reasoning trace" {
+		t.Fatalf("thinking state not persisted: %+v", restored)
+	}
+}
+
+func TestTerminalThinkingCommands(t *testing.T) {
+	previous := thinkingEnabled
+	thinkingEnabled = false
+	t.Cleanup(func() { thinkingEnabled = previous })
+
+	if !handleSlashCommand("/think-on", &Stats{}) || !thinkingEnabled {
+		t.Fatal("/think-on did not enable thinking")
+	}
+	if !handleSlashCommand("/think-off", &Stats{}) || thinkingEnabled {
+		t.Fatal("/think-off did not disable thinking")
 	}
 }
 

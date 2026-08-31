@@ -72,11 +72,12 @@ OWRAP sends a non-streaming `POST` request to `OLLAMA_URL` with this conceptual 
     {"role": "user", "content": "<conversation input>"}
   ],
   "stream": false,
+  "think": false,
   "format": "json"
 }
 ```
 
-`format: "json"` is included only in autonomous mode. The expected response contains `message.role` and `message.content`. OWRAP does not stream tokens.
+`format: "json"` is included only in autonomous mode. `think` defaults to `false` and is changed at runtime with `/think-on` or `/think-off`. The expected response contains `message.role` and `message.content`; supported thinking models may also return `message.thinking`. OWRAP preserves reasoning separately from answer content and does not stream tokens.
 
 The ordinary model/tool protocol uses one JSON object:
 
@@ -114,6 +115,7 @@ The HTTP client currently uses `http.Post` without a request timeout and does no
 - Session ID and creation time.
 - Messages and stats.
 - Per-session auto-analysis flag.
+- Per-session thinking flag, default disabled.
 - Autonomous goal, retry count, command count, partial findings, and three recent commands.
 - Original prompt metadata used when autonomous mode ends.
 - Optional attachment metadata and temporary path.
@@ -161,6 +163,7 @@ CLI slash commands include:
 | `/cache` | List multiline blocks cached without sending |
 | `/use N [question]` | Send a cached block, optionally with a question |
 | `/auto-on`, `/auto-off` | Toggle post-command model analysis |
+| `/think-on`, `/think-off` | Toggle Ollama model reasoning for subsequent requests |
 | `/execfile P`, `/xf P` | Execute each nonempty, non-comment file line without analysis |
 
 A multiline paste with no follow-up instruction is cached. A paste with a follow-up is sent as one user message.
@@ -189,9 +192,9 @@ HTTP endpoints:
 | `GET /api/health` | Return HTTP 200 if the OWRAP server is running |
 | `GET /api/ollama/status` | Probe Ollama's `/api/tags` endpoint with a two-second timeout |
 
-Web chat recognizes `/auto-on`, `/auto-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
+Web chat recognizes `/auto-on`, `/auto-off`, `/think-on`, `/think-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
 
-The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and drives autonomous continuation by issuing repeated `/api/chat` requests when `autonomousContinue` is true.
+The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, renders returned reasoning in a collapsed disclosure, and drives autonomous continuation by issuing repeated `/api/chat` requests when `autonomousContinue` is true. The active Web thinking mode and returned reasoning persist in `~/.owrap/web_state.json` across browsers and restarts.
 
 ## Prompt System
 

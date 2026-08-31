@@ -20,6 +20,7 @@
 - Works in both terminal and web UI modes
 - Keeps all interactions local on your machine (no external API calls)
 - Sends your messages to the Ollama HTTP chat endpoint with your configured model
+- Supports Ollama model reasoning with runtime `/think-on` and `/think-off` controls; Web reasoning is collapsed by default
 - Executes [allowlisted](./comm.go#L3) shell commands when explicitly requested by the model, captures stdout/stderr, and feeds the output back to continue the conversation
 - Maintains terminal session logs with `/save` and `/load`, and automatically persists the active Web UI conversation across browsers and restarts
 - Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
@@ -66,6 +67,8 @@ Available commands:
   /use N         Send cached block #N (1-based) with optional question
   /auto-on       LLM auto-analyzes command output after execution
   /auto-off      [default] No LLM auto-analysis after command execution
+  /think-on      Ask supported models to return reasoning
+  /think-off     [default] Disable model reasoning
   /execfile P    Execute each non-empty line in file P (no analysis)
 Model-run allowed commands:
   [ansible, arp, cat, chmod, curl, date, df, dig, echo, ffuf, find, for, grep, head, httpx, ip, jq, ls, nc, netcat, nmap, nslookup, openssl, ping, pwd, sh, sort, subfinder, tail, telnet, terraform, traceroute, tree, uniq, uptime, wc, wget, while, whois, xargs]
