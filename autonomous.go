@@ -45,6 +45,11 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
+	defer func() {
+		if err := webStore.persist(); err != nil {
+			log.Printf("warning: could not persist Web UI state: %v", err)
+		}
+	}()
 
 	// Save original prompt
 	sess.OriginalPrompt = systemPrompt
@@ -136,6 +141,11 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
+	defer func() {
+		if err := webStore.persist(); err != nil {
+			log.Printf("warning: could not persist Web UI state: %v", err)
+		}
+	}()
 
 	if !sess.AutonomousMode {
 		writeJSON(w, http.StatusOK, map[string]interface{}{

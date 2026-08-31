@@ -47,6 +47,7 @@ func TestHandleWebChatCountsRawReplyAndCommandOutput(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
 			ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: test.ollamaContent}})
 			}))
@@ -152,5 +153,48 @@ func TestStatsTimingAndSessionPersistence(t *testing.T) {
 	}
 	if loaded.Stats.LastResponseMillis != 1250 || loaded.Stats.EstimatedContextTokens != 25 {
 		t.Fatalf("stats not preserved: %+v", loaded.Stats)
+	}
+}
+
+func TestWebStatePersistsAcrossClientsAndRestart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	previousStore := webStore
+	t.Cleanup(func() { webStore = previousStore })
+
+	webStore = newWebSessionStore()
+	original := webStore.ensure("")
+	original.appendMessage("user", "shared question")
+	original.appendMessage("assistant", "shared answer")
+	if err := webStore.persist(); err != nil {
+		t.Fatal(err)
+	}
+
+	restartedStore := newWebSessionStore()
+	if err := restartedStore.load(); err != nil {
+		t.Fatal(err)
+	}
+	webStore = restartedStore
+
+	response := httptest.NewRecorder()
+	handleWebState(response, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var restored webStateResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.SessionID != original.ID || len(restored.Messages) != 2 {
+		t.Fatalf("state not restored: %+v", restored)
+	}
+
+	resetResponse := httptest.NewRecorder()
+	handleWebState(resetResponse, httptest.NewRequest(http.MethodDelete, "/api/state", nil))
+	if resetResponse.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, body = %s", resetResponse.Code, resetResponse.Body.String())
+	}
+	current := webStore.ensure(original.ID)
+	if current.ID == original.ID || len(current.Messages) != 0 {
+		t.Fatalf("shared reset did not replace active session: %+v", current)
 	}
 }

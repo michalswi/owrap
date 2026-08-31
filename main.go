@@ -53,6 +53,19 @@ type webSession struct {
 type webSessionStore struct {
 	mu       sync.Mutex
 	sessions map[string]*webSession
+	activeID string
+}
+
+type persistedWebState struct {
+	Session *webSession `json:"session"`
+}
+
+type webStateResponse struct {
+	SessionID string        `json:"sessionId"`
+	Messages  []ChatMessage `json:"messages"`
+	Stats     Stats         `json:"stats"`
+	Model     string        `json:"model"`
+	Prompt    string        `json:"prompt"`
 }
 
 func newWebSessionStore() *webSessionStore {
@@ -69,20 +82,102 @@ func (s *webSessionStore) get(id string) (*webSession, bool) {
 func (s *webSessionStore) create() *webSession {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.createLocked()
+}
+
+func (s *webSessionStore) createLocked() *webSession {
 	id := fmt.Sprintf("sess_%d", time.Now().UnixNano())
 	sess := &webSession{ID: id, CreatedAt: time.Now()}
 	s.sessions[id] = sess
+	s.activeID = id
 	return sess
 }
 
 func (s *webSessionStore) ensure(id string) *webSession {
-	if id == "" {
-		return s.create()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id != "" {
+		if sess, ok := s.sessions[id]; ok {
+			s.activeID = id
+			return sess
+		}
 	}
-	if sess, ok := s.get(id); ok {
-		return sess
+	if s.activeID != "" {
+		if sess, ok := s.sessions[s.activeID]; ok {
+			return sess
+		}
 	}
-	return s.create()
+	return s.createLocked()
+}
+
+func (s *webSessionStore) active() (*webSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sess, ok := s.sessions[s.activeID]
+	return sess, ok
+}
+
+func (s *webSessionStore) reset() *webSession {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = make(map[string]*webSession)
+	return s.createLocked()
+}
+
+func (s *webSessionStore) load() error {
+	path, err := owrapWebStatePath()
+	if err != nil {
+		return err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read web state: %w", err)
+	}
+	var state persistedWebState
+	if err := json.Unmarshal(data, &state); err != nil {
+		return fmt.Errorf("failed to decode web state: %w", err)
+	}
+	if state.Session == nil || state.Session.ID == "" {
+		return nil
+	}
+	state.Session.Stats.updateContext(systemPrompt, state.Session.Messages)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.sessions = map[string]*webSession{state.Session.ID: state.Session}
+	s.activeID = state.Session.ID
+	return nil
+}
+
+func (s *webSessionStore) persist() error {
+	s.mu.Lock()
+	sess, ok := s.sessions[s.activeID]
+	if !ok {
+		s.mu.Unlock()
+		return nil
+	}
+	data, err := json.MarshalIndent(persistedWebState{Session: sess}, "", "  ")
+	s.mu.Unlock()
+	if err != nil {
+		return fmt.Errorf("failed to encode web state: %w", err)
+	}
+	path, err := owrapWebStatePath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return fmt.Errorf("failed to create web state directory: %w", err)
+	}
+	tempPath := path + ".tmp"
+	if err := os.WriteFile(tempPath, data, 0600); err != nil {
+		return fmt.Errorf("failed to write web state: %w", err)
+	}
+	if err := os.Rename(tempPath, path); err != nil {
+		return fmt.Errorf("failed to replace web state: %w", err)
+	}
+	return nil
 }
 
 var webStore = newWebSessionStore()
@@ -700,6 +795,14 @@ func owrapAutonomousSessionDir(sessionID string) (string, error) {
 	return filepath.Join(baseDir, "autonomous_files", sessionID), nil
 }
 
+func owrapWebStatePath() (string, error) {
+	baseDir, err := owrapHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(baseDir, "web_state.json"), nil
+}
+
 // splitRedirection extracts a single stdout redirection (> or >> filename) if present.
 func splitRedirection(fields []string) (args []string, redirectFile string, appendMode bool, err error) {
 	for i := 0; i < len(fields); i++ {
@@ -718,8 +821,12 @@ func splitRedirection(fields []string) (args []string, redirectFile string, appe
 }
 
 func startWebUI(bindAddr string) error {
+	if err := webStore.load(); err != nil {
+		log.Printf("warning: could not restore Web UI state: %v", err)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat", handleWebChat)
+	mux.HandleFunc("/api/state", handleWebState)
 	mux.HandleFunc("/api/prompt", handleWebPrompt)
 	mux.HandleFunc("/api/prompts/list", handleListPrompts)
 	mux.HandleFunc("/api/prompts/update", handleUpdatePrompt)
@@ -736,6 +843,37 @@ func startWebUI(bindAddr string) error {
 
 	log.Printf("web UI listening on %s (model=%s, prompt=%s, chars=%d)\n", bindAddr, modelName, systemPromptName, len(systemPrompt))
 	return http.ListenAndServe(bindAddr, mux)
+}
+
+func handleWebState(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		sess := webStore.ensure("")
+		sess.Stats.updateContext(systemPrompt, sess.Messages)
+		writeJSON(w, http.StatusOK, webStateResponse{
+			SessionID: sess.ID,
+			Messages:  sess.Messages,
+			Stats:     sess.Stats,
+			Model:     modelName,
+			Prompt:    systemPromptName,
+		})
+	case http.MethodDelete:
+		sess := webStore.reset()
+		sess.Stats.updateContext(systemPrompt, sess.Messages)
+		if err := webStore.persist(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, webStateResponse{
+			SessionID: sess.ID,
+			Messages:  sess.Messages,
+			Stats:     sess.Stats,
+			Model:     modelName,
+			Prompt:    systemPromptName,
+		})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func serveWebIndex(w http.ResponseWriter, r *http.Request) {
@@ -906,6 +1044,11 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
+	defer func() {
+		if err := webStore.persist(); err != nil {
+			log.Printf("warning: could not persist Web UI state: %v", err)
+		}
+	}()
 
 	log.Printf("[CHAT] Session %s, autonomous: %v", sess.ID, sess.AutonomousMode)
 

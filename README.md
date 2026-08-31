@@ -21,9 +21,9 @@
 - Keeps all interactions local on your machine (no external API calls)
 - Sends your messages to the Ollama HTTP chat endpoint with your configured model
 - Executes [allowlisted](./comm.go#L3) shell commands when explicitly requested by the model, captures stdout/stderr, and feeds the output back to continue the conversation
-- Maintains session logs (user/assistant messages, statistics) in memory with `/save` and `/load` support for `~/.owrap/sessions`
+- Maintains terminal session logs with `/save` and `/load`, and automatically persists the active Web UI conversation across browsers and restarts
 - Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
-- Supports **file uploads** in web UI - upload text/code files for one-time analysis with custom prompts
+- Supports **file uploads** in web UI - reuse text/code files across prompts and enable or disable attached context
 - Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button). More [here](#-system-prompts)
 - [beta version] Features **autonomous mode** in web UI - agent continuously works toward user-defined goals, executing commands, analyzing files, collecting information, and generating reports until completion. Supports optional file attachments as reference/knowledge base. More [here](#-autonomous-mode)
 

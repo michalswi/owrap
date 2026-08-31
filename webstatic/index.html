@@ -545,7 +545,7 @@
     </div>
 
     <div class="save-notice">
-      <strong>Unsaved by default</strong><span>Use /save to keep this session in ~/.owrap.</span>
+      <strong>Automatically restored</strong><span>Use /save to create a named session snapshot.</span>
     </div>
 
     <div class="workspace-grid">
@@ -970,36 +970,69 @@
       }
     }
 
-    function loadState() {
-      let parsed = null;
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) parsed = JSON.parse(raw);
-      } catch (_) {
-        parsed = null;
+    function renderRestoredMessages(messages = []) {
+      logEl.innerHTML = '';
+      for (const message of messages) {
+        if (message.role === 'system') continue;
+        if (message.role === 'user') {
+          appendSeparator();
+          appendLine(`You: ${message.content}`, 'user');
+        } else if (message.role === 'assistant') {
+          appendLine(`Assistant: ${message.content}`, 'assistant');
+        }
       }
-      if (!parsed) return false;
-      restoringState = true;
-      if (parsed.log) logEl.innerHTML = parsed.log;
-      if (parsed.sessionId) {
-        sessionId = parsed.sessionId;
-        sessionEl.textContent = `session: ${sessionId}`;
-      }
-      if (parsed.stats) {
-        renderStats(parsed.stats, true);
-      }
-      if (parsed.model) modelEl.textContent = parsed.model;
-      if (parsed.prompt) promptEl.textContent = parsed.prompt;
-      if (parsed.version) versionEl.textContent = parsed.version;
-      restoringState = false;
-      return true;
     }
 
-    function clearChat() {
+    async function loadState() {
+      try {
+        const response = await fetch('/api/state');
+        if (!response.ok) throw new Error(`state request failed: ${response.status}`);
+        const state = await response.json();
+        restoringState = true;
+        sessionId = state.sessionId || '';
+        sessionEl.textContent = `session: ${sessionId}`;
+        renderRestoredMessages(state.messages || []);
+        renderStats(state.stats || emptyStats, true);
+        if (state.model) modelEl.textContent = `model: ${state.model}`;
+        if (state.prompt) promptEl.textContent = `sys-prompt: ${state.prompt}`;
+        restoringState = false;
+        saveState();
+        return true;
+      } catch (_) {
+        let parsed = null;
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) parsed = JSON.parse(raw);
+        } catch (_) {
+          parsed = null;
+        }
+        if (!parsed) return false;
+        restoringState = true;
+        if (parsed.log) logEl.innerHTML = parsed.log;
+        if (parsed.sessionId) {
+          sessionId = parsed.sessionId;
+          sessionEl.textContent = `session: ${sessionId}`;
+        }
+        if (parsed.stats) renderStats(parsed.stats, true);
+        restoringState = false;
+        return true;
+      }
+    }
+
+    async function clearChat() {
+      let resetState;
+      try {
+        const response = await fetch('/api/state', { method: 'DELETE' });
+        if (!response.ok) throw new Error(`reset failed: ${response.status}`);
+        resetState = await response.json();
+        sessionId = resetState.sessionId || '';
+      } catch (error) {
+        appendLine(`Could not clear shared session: ${error.message}`, 'error');
+        return;
+      }
       logEl.innerHTML = '';
-      sessionId = '';
-      sessionEl.textContent = 'session: new';
-      renderStats(emptyStats, true);
+      sessionEl.textContent = `session: ${sessionId}`;
+      renderStats(resetState.stats || emptyStats, true);
       lastResponseTime = null;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
@@ -1955,16 +1988,17 @@
       }
     });
 
-    initTheme();
-    const restored = loadState();
-    fetchPrompt();
-    checkOllamaStatus();
-    // Check Ollama status every 10 seconds
-    setInterval(checkOllamaStatus, 10000);
-    if (!restored) {
-      renderStats(emptyStats, true);
+    async function initializeApp() {
+      initTheme();
+      const restored = await loadState();
+      await fetchPrompt();
+      checkOllamaStatus();
+      setInterval(checkOllamaStatus, 10000);
+      if (!restored) renderStats(emptyStats, true);
+      msgEl.focus();
     }
-    msgEl.focus();
+
+    initializeApp();
   </script>
 </body>
 </html>

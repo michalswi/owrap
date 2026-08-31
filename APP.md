@@ -39,7 +39,7 @@ Keep these boundaries in mind when reasoning about the app:
 - `vars.go`: version, default system prompt, environment-derived configuration, global CLI state, and web help text.
 - `banner.go`: terminal banner.
 - `utils/utils.go`: environment lookup and startup system-prompt loading.
-- `webstatic/index.html`: complete browser UI, client state, local storage, API calls, autonomous-loop driver, and attachment reader.
+- `webstatic/index.html`: complete browser UI, server-state restoration, local preferences, API calls, autonomous-loop driver, and attachment reader.
 - `prompts/*.txt`: predefined role prompts and the autonomous-agent protocol prompt.
 - `Makefile`: native, cross-platform, and multi-architecture Docker build targets.
 - `Dockerfile`: multi-stage image that runs web mode as an unprivileged `app` user.
@@ -171,13 +171,14 @@ Session loading restores active conversational context. Saved sessions can there
 
 Web mode uses `net/http.ServeMux`. The binary embeds `webstatic/*` with `go:embed`; `index.html` is served at `/`, and embedded files are exposed under `/static/`.
 
-The browser stores UI history and preferences in `localStorage`, while authoritative chat state is held in the Go process. A generated session ID has the form `sess_<UnixNano>`.
+The Go server owns one active Web UI session and persists it to `~/.owrap/web_state.json`. A newly opened browser restores structured messages and stats through `GET /api/state`; `localStorage` is only a fallback for UI state and stores theme preferences. A generated session ID has the form `sess_<UnixNano>`.
 
 HTTP endpoints:
 
 | Endpoint | Purpose |
 |---|---|
 | `POST /api/chat` | Chat, slash commands, tool actions, jobs, and autonomous iterations |
+| `GET`, `DELETE /api/state` | Restore or clear the shared active Web UI session |
 | `GET /api/prompt` | Active prompt, prompt name, model, and app version |
 | `GET /api/prompts/list` | Available `.txt` prompt files and current selection |
 | `POST /api/prompts/update` | Select a prompt file or submit custom prompt text |
@@ -274,7 +275,7 @@ The autonomous prompt is designed for larger local models and insists on a singl
 
 CLI and web saves use JSON files in `~/.owrap/sessions`. An omitted name produces `owrap_YYYYMMDD_HHMM.json`; a supplied name receives `.json` if needed. Files are sorted alphabetically when listed.
 
-Web sessions and jobs have no eviction or expiry. They remain in memory until process exit. Server restart loses unsaved web state and all job metadata.
+The active Web session is restored after process restart from `~/.owrap/web_state.json`. Background job process metadata remains memory-only and is not resumable after restart.
 
 Autonomous attachments are intended to be temporary. Manual stop deletes the session directory. Normal completion and JSON-retry exhaustion currently stop autonomous mode without performing the same attachment cleanup.
 
@@ -343,7 +344,7 @@ Think of OWRAP as five cooperating layers:
 2. **Conversation layer:** system prompt plus `ChatMessage` history and stats.
 3. **Model layer:** non-streaming Ollama `/api/chat` calls using a small JSON action protocol.
 4. **Action layer:** synchronous commands, background jobs, analysis calls, and autonomous state transitions.
-5. **Persistence layer:** in-memory web stores, browser local storage, and application files under `~/.owrap`.
+5. **Persistence layer:** active Web state and saved sessions under `~/.owrap`, in-memory job state, and browser-local UI preferences.
 
 A normal request moves from interface to conversation to Ollama, then either returns an answer or enters command execution. Autonomous mode repeats that path under a strict JSON prompt until a final `answer`, a manual stop, or three invalid-JSON responses end the loop.
 
