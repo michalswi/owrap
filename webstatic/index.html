@@ -3,21 +3,416 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>owrapUI</title>
+  <title>owrap</title>
   <base href="/static/webstatic/">
   <link rel="icon" href="img/favicon.png" type="image/png" sizes="16x16">
   <style>
     :root {
-      --bg: #06080f;
+      --desktop-start: #29404a;
+      --desktop-mid: #617d7c;
+      --desktop-end: #c1846d;
+      --window: rgba(246, 247, 249, 0.94);
+      --titlebar: rgba(237, 239, 242, 0.92);
+      --panel: #ffffff;
+      --panel-2: #f1f2f4;
+      --border: rgba(45, 52, 61, 0.16);
+      --text: #202124;
+      --muted: #6d7178;
+      --accent: #0a84ff;
+      --accent-2: #0071e3;
+      --success: #28a745;
+      --terminal: #17191d;
+      --terminal-border: #292d33;
+      --terminal-text: #e9ebee;
+      --shadow: 0 32px 90px rgba(15, 24, 31, 0.35), 0 2px 10px rgba(15, 24, 31, 0.18);
+    }
+    :root[data-theme="dark"] {
+      --desktop-start: #17252b;
+      --desktop-mid: #344c4d;
+      --desktop-end: #704b41;
+      --window: rgba(35, 36, 39, 0.96);
+      --titlebar: rgba(45, 46, 50, 0.94);
+      --panel: #2b2c30;
+      --panel-2: #242529;
+      --border: rgba(255, 255, 255, 0.11);
+      --text: #f2f2f4;
+      --muted: #a7a8ae;
+      --terminal: #151619;
+      --terminal-border: #3a3c42;
+      --terminal-text: #f2f3f5;
+      --shadow: 0 36px 100px rgba(0, 0, 0, 0.56), 0 2px 12px rgba(0, 0, 0, 0.35);
+    }
+    :root[data-theme="light"] {
+      --desktop-start: #29404a;
+      --desktop-mid: #78908b;
+      --desktop-end: #d0967d;
+      --window: rgba(248, 249, 251, 0.95);
+      --titlebar: rgba(238, 240, 243, 0.93);
+      --panel: #ffffff;
+      --panel-2: #f2f3f5;
+      --border: rgba(45, 52, 61, 0.16);
+      --text: #202124;
+      --muted: #686c73;
+      --terminal: #1b1d21;
+      --terminal-border: #30343a;
+      --terminal-text: #f5f6f7;
+    }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      color: var(--text);
+      font-family: "Avenir Next", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+      letter-spacing: 0;
+      background:
+        radial-gradient(circle at 18% 0%, rgba(94, 92, 230, 0.12), transparent 34%),
+        radial-gradient(circle at 82% 0%, rgba(0, 199, 190, 0.1), transparent 32%),
+        var(--window);
+    }
+    button, textarea, input { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .row { display: flex; align-items: center; }
+    .desktop { width: 100%; margin: 0; }
+    .app-window {
+      min-height: 100vh;
+      overflow: visible;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      animation: none;
+    }
+    @keyframes window-in {
+      from { opacity: 0; transform: translateY(10px) scale(0.99); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      min-height: 64px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      background: rgba(24, 25, 29, 0.88);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(18px) saturate(130%);
+      -webkit-backdrop-filter: blur(18px) saturate(130%);
+    }
+    :root[data-theme="light"] header { background: rgba(245, 246, 248, 0.9); }
+    .header-left, .header-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .header-right { justify-content: flex-end; }
+    .header-icon { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 9px; box-shadow: 0 2px 8px rgba(0,0,0,0.28); }
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 11px;
+      gap: 7px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 12px;
+      font-family: "SFMono-Regular", Menlo, monospace;
+    }
+    .status-light {
+      width: 9px;
+      height: 9px;
+      flex: 0 0 9px;
+      border-radius: 50%;
+      background: #ff9f0a;
+      box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.14);
+      transition: background 180ms ease, box-shadow 180ms ease;
+    }
+    .status-light.ready { background: #30d158; box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.16); }
+    .status-light.not-ready { background: #ff453a; box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.16); }
+    .status-light.checking { background: #ff9f0a; box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.14); }
+    #ollamaStatusText { color: #ff9f0a; font-weight: 650; }
+    .status-light.ready + #ollamaStatusText { color: #30d158; }
+    .status-light.not-ready + #ollamaStatusText { color: #ff453a; }
+    .status-light.checking + #ollamaStatusText { color: #ff9f0a; }
+    .theme-toggle {
+      width: 40px;
+      height: 38px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      background: rgba(128,128,128,0.1) !important;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      box-shadow: none;
+      font-size: 16px;
+    }
+    .theme-toggle:hover { background: rgba(128,128,128,0.18) !important; transform: none !important; }
+    .pill {
+      min-width: 0;
+      padding: 8px 12px;
+      color: var(--muted);
+      background: rgba(128,128,128,0.08);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font: 12px/1.3 "SFMono-Regular", Menlo, monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    main { max-width: none; margin: 0; padding: 18px; }
+    .save-notice {
+      margin-bottom: 12px !important;
+      padding: 8px 11px !important;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted) !important;
+      background: rgba(255, 159, 10, 0.08) !important;
+      border: 1px solid rgba(255, 159, 10, 0.24) !important;
+      border-radius: 7px !important;
+      font-size: 11px !important;
+    }
+    #autonomousGoalBanner {
+      margin-bottom: 12px !important;
+      padding: 12px 14px !important;
+      background: rgba(10, 132, 255, 0.08) !important;
+      border: 1px solid rgba(10, 132, 255, 0.28) !important;
+      border-radius: 8px !important;
+    }
+    #autonomousGoalBanner > div:first-child { margin-bottom: 0 !important; }
+    #activeJobsContainer { border-radius: 6px !important; }
+    .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 14px; align-items: start; }
+    .conversation-column, .utility-column { display: grid; gap: 14px; min-width: 0; }
+    .panel, .terminal-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .terminal-panel { overflow: hidden; background: var(--terminal); border-color: var(--terminal-border); }
+    .panel-titlebar {
+      height: 36px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #aeb2b8;
+      background: #22252a;
+      border-bottom: 1px solid var(--terminal-border);
+      font: 11px "SFMono-Regular", Menlo, monospace;
+    }
+    .terminal-dots { display: flex; gap: 5px; }
+    .terminal-dots span { width: 6px; height: 6px; border-radius: 50%; background: #555a62; }
+    #log {
+      min-height: 500px;
+      max-height: 64vh;
+      padding: 16px;
+      overflow-y: auto;
+      color: var(--terminal-text);
+      background: var(--terminal);
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      scrollbar-color: #4a4e55 transparent;
+      white-space: pre-wrap;
+    }
+    :root[data-theme="light"] #log { color: var(--terminal-text); }
+    .log-line { margin: 5px 0; font-size: 12px; line-height: 1.65; }
+    .log-user, .label-user { color: #ffcc66; }
+    .log-assistant, .label-assistant { color: #76d991; }
+    .log-command { color: #67c8ff; }
+    .log-plain, :root[data-theme="light"] #log .log-plain { color: var(--terminal-text); }
+    .log-sep { margin: 12px 0; border-bottom: 1px solid #343840; opacity: 1; }
+    .panel { padding: 13px; }
+    .panel-heading { margin: 0 0 11px; color: var(--text); font-size: 11px; font-weight: 650; text-transform: uppercase; }
+    .toolbar-group { padding-top: 11px; margin-top: 11px; border-top: 1px solid var(--border); }
+    .toolbar-group:first-of-type { padding-top: 0; margin-top: 0; border-top: 0; }
+    .toolbar-label { margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    .stack { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    button {
+      min-height: 32px;
+      padding: 7px 10px;
+      color: var(--text);
+      background: var(--panel-2) !important;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: none;
+      font-size: 11px;
+      font-weight: 600;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    button:hover:not(:disabled) { background: rgba(10,132,255,0.1) !important; border-color: rgba(10,132,255,0.4); box-shadow: none; transform: translateY(-1px); }
+    button:active:not(:disabled) { transform: translateY(0); }
+    #send, #saveSessionConfirm, #loadSessionConfirm, #saveCustomPrompt, #startAutonomousConfirm {
+      color: #fff;
+      background: var(--accent-2) !important;
+      border-color: var(--accent-2);
+    }
+    #clearChat { color: #ff453a; background: rgba(255,69,58,0.08) !important; border-color: rgba(255,69,58,0.22); }
+    #showHelp { grid-column: 1 / -1; }
+    #autonomousStart { grid-column: 1 / -1; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
+    #autonomousStop { grid-column: 1 / -1; color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    .file-upload-btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .file-upload-btn input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .info-icon { width: 15px; height: 15px; margin-left: 2px; color: var(--muted); background: rgba(128,128,128,0.14); font-size: 9px; }
+    .file-name { display: block; max-width: 100%; margin: 8px 0 0; font-size: 10px; text-align: center; }
+    .composer-panel { padding: 13px; }
+    label { margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    textarea, input[type="text"] {
+      width: 100%;
+      padding: 10px 11px;
+      color: var(--text);
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+      outline: none;
+    }
+    textarea:focus, input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(10,132,255,0.14); }
+    textarea { min-height: 112px; resize: vertical; font: 12px/1.55 "SFMono-Regular", Menlo, monospace; }
+    .composer-actions { margin-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .composer-actions .row { gap: 7px; }
+    .composer-hint { max-width: 260px; color: var(--muted); font-size: 10px; text-align: right; }
+    .spinner { width: 16px; height: 16px; display: none; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .spinner.visible { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .stats-panel { padding: 0; overflow: hidden; }
+    .stats-header { min-height: 40px; margin: 0 !important; padding: 0 12px; }
+    .stats-header h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; }
+    #statsToggle { font-size: 12px !important; }
+    .stats-grid { display: grid; padding: 0 12px 12px; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .stats-grid.collapsed { display: none; }
+    .stat-card {
+      min-width: 0;
+      padding: 10px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+    .stat-card::before { display: none; }
+    .stat-top { display: block; }
+    .stat-label { font-size: 9px; text-transform: none; }
+    .stat-tag { display: none; }
+    .stat-value { margin: 4px 0 1px; color: var(--text); font-size: 23px; font-weight: 650; }
+    .stat-sub { font-size: 9px; line-height: 1.4; }
+    #modalOverlay { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(15,18,22,0.42); backdrop-filter: blur(12px); }
+    #modalOverlay.show { display: flex; }
+    .modal-card {
+      width: min(92vw, 680px);
+      max-height: min(86vh, 760px);
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      overflow: hidden;
+      color: var(--text);
+      background: var(--window);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 12px;
+      box-shadow: 0 28px 80px rgba(0,0,0,0.42);
+    }
+    .modal-header {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0;
+      padding: 0 10px 0 14px;
+      flex: 0 0 auto;
+      background: var(--titlebar);
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-title { min-width: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+    .modal-close {
+      width: 30px;
+      height: 30px;
+      min-height: 30px;
+      flex: 0 0 30px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      color: var(--muted);
+      background: transparent !important;
+      border-color: transparent;
+      border-radius: 6px;
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); background: rgba(128,128,128,0.14) !important; border-color: transparent !important; transform: none !important; }
+    .modal-body { min-height: 0; padding: 14px; overflow: auto; font-size: 12px; line-height: 1.5; }
+    .modal-pre {
+      max-width: 100%;
+      max-height: 62vh;
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      color: var(--terminal-text);
+      background: var(--terminal);
+      border: 1px solid var(--terminal-border);
+      border-radius: 7px;
+      font: 11px/1.55 "SFMono-Regular", Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 980px) {
+      .workspace-grid { grid-template-columns: 1fr; }
+      .utility-column { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+      #log { min-height: 420px; }
+    }
+    @media (max-width: 700px) {
+      header { position: static; min-height: 58px; align-items: center; padding: 10px 12px; }
+      .header-left { flex-wrap: nowrap; gap: 8px; }
+      .header-icon { width: 34px; height: 34px; }
+      header #model, header #prompt, header #session, header #version { display: none; }
+      main { padding: 10px; }
+      .utility-column { grid-template-columns: 1fr; }
+      #log { min-height: 360px; max-height: 52vh; }
+      .composer-actions { align-items: flex-start; flex-direction: column; }
+      .composer-hint { max-width: none; text-align: left; }
+      #modalOverlay { align-items: flex-end; padding: 10px; }
+      .modal-card { width: 100%; max-height: calc(100dvh - 20px); border-radius: 10px; }
+      .modal-body { padding: 10px; }
+      .modal-pre { padding: 10px; font-size: 10px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .app-window { animation: none; }
+      * { scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="desktop">
+    <div class="app-window">
+      <header>
+        <div class="header-left">
+          <img class="header-icon" src="img/webui.png" alt="OWRAP" />
+          <div class="status-indicator">
+            <div class="status-light checking" id="ollamaStatus" title="Checking Ollama status"></div>
+            <span id="ollamaStatusText" role="status" aria-live="polite">checking...</span>
+          </div>
+          <div class="pill" id="model">model: ...</div>
+          <div class="pill" id="prompt">sys-prompt: loaded</div>
+          <div class="pill" id="session">session: new</div>
+        </div>
+        <div class="header-right">
+          <button class="theme-toggle" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme">◐</button>
+          <div class="pill" id="version">version: ...</div>
+        </div>
+      </header>
+      <template id="legacyUiFragment">
       --panel: #0d111a;
       --panel-2: #111827;
       --border: #1f2937;
-      --text: #e6edf3;
-      --muted: #9ca3af;
-      --accent: #7c3aed;
-      --accent-2: #22d3ee;
-      --success: #22c55e;
-    }
+      </div>
     :root[data-theme="light"] {
       --bg: #f8fafc;
       --panel: #ffffff;
@@ -122,6 +517,7 @@
       <div class="pill" id="version">version: ...</div>
     </div>
   </header>
+  </template>
   <main>
     <!-- <h2>owrapUI</h2> -->
 
@@ -141,105 +537,113 @@
       </div>
     </div>
 
-    <div style="margin-bottom: 12px; padding: 10px 14px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px; font-size: 13px; color: var(--muted);">
-      ℹ️ <strong>Note:</strong> Sessions are not saved by default. Use the <strong>/save</strong> button to save your current session.
+    <div class="save-notice">
+      <strong>Unsaved by default</strong><span>Use /save to keep this session in ~/.owrap.</span>
     </div>
 
-    <div id="log"></div>
+    <div class="workspace-grid">
+      <section class="conversation-column">
+        <div class="terminal-panel">
+          <div class="panel-titlebar">
+            <span>Conversation</span>
+            <div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          </div>
+          <div id="log"></div>
+        </div>
 
-    <div class="panel" style="margin-top:16px;">
-      <div class="stack" style="justify-content: center;">
-        <button id="showPrompt" type="button">Show sys-prompt</button>
-        <button id="editPrompt" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">Edit sys-prompt</button>
-        <button class="file-upload-btn" type="button">
-          📎 Upload File
-          <span class="info-icon" id="fileUploadInfo" title="Click for file upload info">ℹ️</span>
-          <input type="file" id="fileUpload" accept="*/*" />
-        </button>
-      </div>
-      <div class="stack" style="justify-content: center; margin-top: 10px;">
-        <button id="showHelp" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/help</button>
-        <button id="showMyPrompts" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">/myprompts</button>
-        <button id="autoOn" type="button">/auto-on</button>
-        <button id="autoOff" type="button">/auto-off</button>
-        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/save</button>
-        <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
-        <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
-        <button id="showLast" type="button">/last</button>
-      </div>
-      <div class="stack" style="justify-content: center; margin-top: 10px;">
-        <button id="autonomousStart" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🤖 /autostart</button>
-        <button id="autonomousStop" type="button" style="background: linear-gradient(135deg, #64748b, #475569); display: none;">⏹️ /autostop</button>
-      </div>
-      <div style="text-align: center; margin-top: 4px;">
-        <span id="fileName" class="file-name"></span>
-      </div>
-    </div>
+        <div class="panel composer-panel">
+          <label for="msg">Message <span style="font-weight:400;">(⌘/Ctrl+Enter to send)</span></label>
+          <textarea id="msg" placeholder="Ask a question or request a command..."></textarea>
+          <div class="composer-actions">
+            <div class="row">
+              <button id="send">Send</button>
+              <button id="clearChat" type="button">Clear</button>
+              <div id="sendSpinner" class="spinner" aria-hidden="true"></div>
+              <span id="quickResponseTime" style="font-size:10px; color:var(--accent); font-weight:600; display:none;">0.000s</span>
+            </div>
+            <span class="composer-hint">The assistant can run allowlisted commands.</span>
+          </div>
+        </div>
+      </section>
 
-    <div class="panel" style="margin-top:16px;">
-      <label>Console input (⌘/Ctrl+Enter to send)</label>
-      <textarea id="msg" placeholder="Type a message or command for the assistant."></textarea>
-      <div class="row" style="margin-top:8px; justify-content: space-between;">
-        <div class="row" style="gap:8px;">
-          <button id="send">Send</button>
-          <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
-          <div id="sendSpinner" class="spinner" aria-hidden="true"></div>
-          <span id="quickResponseTime" style="font-size:12px; color:var(--accent-2); font-weight:600; display:none;">⏱️ 0.000s</span>
+      <aside class="utility-column">
+        <div class="panel toolbar-panel">
+          <h2 class="panel-heading">Tools</h2>
+          <div class="toolbar-group">
+            <div class="toolbar-label">Context</div>
+            <div class="stack">
+              <button id="showPrompt" type="button">View system prompt</button>
+              <button id="editPrompt" type="button">Edit system prompt</button>
+              <button class="file-upload-btn" type="button">
+                Attach file
+                <span class="info-icon" id="fileUploadInfo" title="File upload details">i</span>
+                <input type="file" id="fileUpload" accept="*/*" aria-label="Attach file" />
+              </button>
+              <button id="showMyPrompts" type="button">My prompts</button>
+            </div>
+            <span id="fileName" class="file-name"></span>
+          </div>
+          <div class="toolbar-group">
+            <div class="toolbar-label">Session</div>
+            <div class="stack">
+              <button id="saveSession" type="button">/save</button>
+              <button id="loadSession" type="button">/load</button>
+              <button id="listSessions" type="button">/sessions</button>
+              <button id="showLast" type="button">/last</button>
+            </div>
+          </div>
+          <div class="toolbar-group">
+            <div class="toolbar-label">Assistant</div>
+            <div class="stack">
+              <button id="showHelp" type="button">/help</button>
+              <button id="autoOn" type="button">Analysis on</button>
+              <button id="autoOff" type="button">Analysis off</button>
+              <button id="autonomousStart" type="button">Start autonomous</button>
+              <button id="autonomousStop" type="button" style="display: none;">Stop autonomous</button>
+            </div>
+          </div>
         </div>
-        <span style="font-size:12px; color:var(--muted);">Assistant may choose to run allowed commands.</span>
-      </div>
-    </div>
 
-    <div class="panel" style="margin-top:16px;">
-      <div class="row stats-header" id="statsHeader" style="justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <div class="row" style="gap:8px; align-items: center;">
-          <h3 style="margin:0; color: var(--text);">session stats</h3>
-          <span class="pill" style="background: rgba(34,211,238,0.12); color: #a5f3fc;">auto-updates</span>
-        </div>
-        <span id="statsToggle" style="color: var(--muted); font-size: 18px;">▼</span>
-      </div>
-      <div class="stats-grid collapsed" id="statsGrid">
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">User messages</div>
-            <span class="stat-tag">you</span>
+        <div class="panel stats-panel">
+          <div class="row stats-header" id="statsHeader" style="justify-content: space-between; align-items: center;">
+            <div class="row" style="gap:8px; align-items: center;">
+              <h3 style="margin:0; color: var(--text);">Session stats</h3>
+            </div>
+            <span id="statsToggle" style="color: var(--muted);">▼</span>
           </div>
-          <div class="stat-value" id="statUserMessages">0</div>
-          <div class="stat-sub">chars <span id="statUserChars">0</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Assistant messages</div>
-            <span class="stat-tag">assistant</span>
+          <div class="stats-grid collapsed" id="statsGrid">
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">User messages</div><span class="stat-tag">you</span></div>
+              <div class="stat-value" id="statUserMessages">0</div>
+              <div class="stat-sub">chars <span id="statUserChars">0</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">Assistant</div><span class="stat-tag">assistant</span></div>
+              <div class="stat-value" id="statAssistantMessages">0</div>
+              <div class="stat-sub">chars <span id="statAssistantChars">0</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">Commands</div><span class="stat-tag">commands</span></div>
+              <div class="stat-value" id="statCommands">0</div>
+              <div class="stat-sub">run this session</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">Response</div><span class="stat-tag">time</span></div>
+              <div class="stat-value" id="statResponseTime">-</div>
+              <div class="stat-sub">last request</div>
+            </div>
           </div>
-          <div class="stat-value" id="statAssistantMessages">0</div>
-          <div class="stat-sub">chars <span id="statAssistantChars">0</span></div>
         </div>
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Commands run</div>
-            <span class="stat-tag">commands</span>
-          </div>
-          <div class="stat-value" id="statCommands">0</div>
-          <div class="stat-sub">Recent command appears in the log.</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Last response time</div>
-            <span class="stat-tag">time</span>
-          </div>
-          <div class="stat-value" id="statResponseTime">-</div>
-          <div class="stat-sub">Time taken for last response</div>
-        </div>
-      </div>
+      </aside>
     </div>
   </main>
-  <div id="footer">© 2049 michalswi</div>
+    </div>
+  </div>
   <div id="modalOverlay">
-    <div class="modal-card">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-header">
         <div class="modal-title" id="modalTitle"></div>
-        <button class="modal-close" id="modalClose" type="button">OK</button>
+        <button class="modal-close" id="modalClose" type="button" title="Close" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body" id="modalBody"></div>
     </div>
@@ -729,7 +1133,7 @@
         }
       } catch (e) {
         ollamaStatusLight.className = 'status-light not-ready';
-        ollamaStatusText.textContent = 'error';
+        ollamaStatusText.textContent = 'modelNotReady';
         ollamaStatusLight.title = 'Failed to check Ollama status';
       }
     }
