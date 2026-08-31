@@ -27,7 +27,7 @@ Never include backticks, comments, or extra keys.
 `
 
 var ollamaURL = utils.GetEnv("OLLAMA_URL", "http://localhost:11434/api/chat")
-var modelName = utils.GetEnv("OLLAMA_MODEL", "gemma3:4b")
+var modelName = utils.GetEnv("OLLAMA_MODEL", "qwen3.5:0.8b")
 var systemPrompt, systemPromptName = utils.LoadSystemPromptWithName(defaultSystemPrompt)
 var webBindDefault = utils.GetEnv("WEB_BIND", ":8080")
 

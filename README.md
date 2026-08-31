@@ -88,16 +88,17 @@ App requires that Ollama is up and running, e.g.
 $ ollama serve
 (...)
 
-$ ollama pull gemma3:4b
+$ ollama pull qwen3.5:0.8b
 
 $ ollama ls
 NAME                  ID              SIZE      MODIFIED
-gemma3:4b             a2af6cc3eb7f    3.3 GB    5 days ago
+qwen3.5:0.8b          f3817196d142    1.0 GB    2 months ago
+gemma3:4b             a2af6cc3eb7f    3.3 GB    2 months ago
 llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 ```
 
 - **URL** to connect to Ollama: `http://localhost:11434/api/chat` (override with env var `OLLAMA_URL`)
-- **LLM model**: `gemma3:4b` (override with env var `OLLAMA_MODEL`)
+- **LLM model**: `qwen3.5:0.8b` (override with env var `OLLAMA_MODEL`)
 - **System prompt**: Defined [here](./vars.go) by default. You can:
   - Set `SYSTEM_PROMPT` env var to a prompt file path (e.g., `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt`) to load at startup
   - Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI) to change it at runtime
@@ -153,7 +154,7 @@ $ you might use predefined system prompts from ./prompts,
 include 'prompts' dir in the same folder where 'owrap' app
 
 $ ./owrap -web
-2025/12/28 16:19:44 web UI listening on :8080 (model=gemma3:4b, prompt=default, chars=481)
+2025/12/28 16:19:44 web UI listening on :8080 (model=qwen3.5:0.8b, prompt=default, chars=481)
 
 $ open in web browser http://localhost:8080/
 ```
