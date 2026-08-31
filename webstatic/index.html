@@ -419,6 +419,16 @@
       .modal-pre { padding: 10px; font-size: 10px; }
       .stat-span-2 { grid-column: span 1; }
     }
+    #footer {
+      width: 100%;
+      margin: 24px auto 12px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.4;
+      text-align: center;
+      letter-spacing: 0;
+    }
+    #footer a { color: var(--accent); }
     @media (prefers-reduced-motion: reduce) {
       .app-window { animation: none; }
       * { scroll-behavior: auto !important; }
@@ -531,7 +541,6 @@
     .label-user { color: #fbbf24; font-weight: 700; }
     .label-assistant { color: #22c55e; font-weight: 700; }
     .log-sep { border-bottom: 2px dashed #22d3ee; opacity: 0.85; margin: 10px 0 12px; }
-    #footer { text-align: center; color: var(--muted); font-size: 12px; margin: 24px 0 12px; letter-spacing: 0.3px; }
     @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
     @media (max-width: 640px) { .stat-span-2 { grid-column: span 1; } }
   </style>
@@ -687,6 +696,7 @@
   </main>
     </div>
   </div>
+  <footer id="footer">Open Source &bull; Available on <a href="https://github.com/michalswi/owrap" target="_blank" rel="noopener noreferrer">GitHub</a> &copy;2049 michalswi</footer>
   <div id="modalOverlay">
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-header">
