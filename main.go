@@ -223,27 +223,66 @@ type Session struct {
 }
 
 type Stats struct {
-	UserMessages        int
-	AssistantMessages   int
-	CommandsRun         int
-	TotalUserChars      int
-	TotalAssistantChars int
-	LastCommand         string
+	UserMessages           int
+	AssistantMessages      int
+	CommandsRun            int
+	TotalUserChars         int
+	TotalAssistantChars    int
+	LastCommand            string
+	ContextChars           int
+	EstimatedContextTokens int
+	LastResponseMillis     int64
 }
 
-func (s *Stats) recordUser(msg string) {
-	s.UserMessages++
-	s.TotalUserChars += len(msg)
+func (s *Stats) recordMessage(message ChatMessage) {
+	switch message.Role {
+	case "user":
+		s.UserMessages++
+		s.TotalUserChars += len(message.Content)
+	case "assistant":
+		s.AssistantMessages++
+		s.TotalAssistantChars += len(message.Content)
+	}
 }
 
-func (s *Stats) recordAssistant(msg string) {
-	s.AssistantMessages++
-	s.TotalAssistantChars += len(msg)
+func (s *Stats) updateContext(systemPrompt string, messages []ChatMessage) {
+	contextChars := len(systemPrompt)
+	for _, message := range messages {
+		if message.Role != "system" {
+			contextChars += len(message.Content)
+		}
+	}
+	s.ContextChars = contextChars
+	s.EstimatedContextTokens = (contextChars + 3) / 4
+}
+
+func (s *Stats) recordResponseDuration(duration time.Duration) {
+	s.LastResponseMillis = duration.Milliseconds()
 }
 
 func (s *Stats) recordCommand(cmd string) {
 	s.CommandsRun++
 	s.LastCommand = cmd
+}
+
+func (s *webSession) appendMessage(role, content string) {
+	message := ChatMessage{Role: role, Content: content}
+	s.Messages = append(s.Messages, message)
+	s.Stats.recordMessage(message)
+	s.Stats.updateContext(systemPrompt, s.Messages)
+}
+
+func (s *webSession) appendContextMessage(role, content string) {
+	s.Messages = append(s.Messages, ChatMessage{Role: role, Content: content})
+	s.Stats.updateContext(systemPrompt, s.Messages)
+}
+
+func appendTerminalMessage(messages *[]ChatMessage, stats *Stats, role, content string) {
+	message := ChatMessage{Role: role, Content: content}
+	*messages = append(*messages, message)
+	sessionMessages = append(sessionMessages, message)
+	stats.recordMessage(message)
+	stats.updateContext(systemPrompt, *messages)
 }
 
 func allowedCommandsList() []string {
@@ -1037,6 +1076,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			// Restore session data
 			sess.Messages = loadedSession.Messages
 			sess.Stats = loadedSession.Stats
+			sess.Stats.updateContext(systemPrompt, sess.Messages)
 			writeJSON(w, http.StatusOK, webChatResponse{
 				SessionID:     sess.ID,
 				Action:        "session_loaded",
@@ -1074,8 +1114,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	sess.Stats.recordUser(req.Message)
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: req.Message})
+	sess.appendMessage("user", req.Message)
 
 	// Update autonomous prompt if in autonomous mode
 	if sess.AutonomousMode {
@@ -1089,7 +1128,9 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 	// Force JSON mode only in autonomous mode
 	forceJSON := sess.AutonomousMode
+	requestStarted := time.Now()
 	raw, err := callOllamaWithLogContext(r.Context(), "web-chat:"+sess.ID, messages, forceJSON)
+	sess.Stats.recordResponseDuration(time.Since(requestStarted))
 	if err != nil {
 		http.Error(w, fmt.Sprintf("ollama error: %v", err), http.StatusBadGateway)
 		return
@@ -1126,7 +1167,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Non-autonomous mode: just show the raw output
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
+		sess.appendMessage("assistant", raw)
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,
 			Action:        "answer",
@@ -1159,7 +1200,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 		// Store command output with different prefix to avoid agent mimicking it
 		messageContent := "✓ Result:\n" + out
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+		sess.appendMessage("assistant", messageContent)
 
 		// Autonomous mode: increment counter and generate summary
 		if sess.AutonomousMode {
@@ -1188,7 +1229,9 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			}
 
 			analysisMessages := []ChatMessage{analysisSystemMsg, analysisUserMsg}
+			analysisStarted := time.Now()
 			analysisRaw, err := callOllamaWithLogContext(r.Context(), "web-chat-analysis:"+sess.ID, analysisMessages, false)
+			sess.Stats.recordResponseDuration(time.Since(analysisStarted))
 			if err == nil {
 				analysisText := strings.TrimSpace(analysisRaw)
 
@@ -1210,8 +1253,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 					log.Printf("[AUTO-ANALYSIS] Using plain text response")
 				}
 
-				sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: analysisText})
-				sess.Stats.recordAssistant(analysisText)
+				sess.appendMessage("assistant", analysisText)
 				combined = combined + "\n\n📝 Analysis:\n" + analysisText
 			} else {
 				log.Printf("[AUTO-ANALYSIS] Error: %v", err)
@@ -1247,7 +1289,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 		messageContent := fmt.Sprintf("Started background job: %s\nCommand: %s\nStatus: %s", job.ID, job.Command, job.Status)
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+		sess.appendMessage("assistant", messageContent)
 
 		autoContinue := sess.AutonomousMode
 
@@ -1290,7 +1332,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		messageContent := fmt.Sprintf("Job %s status: %s\nCommand: %s\nStarted: %s\nPartial output:\n%s",
 			job.ID, job.Status, job.Command, job.StartTime.Format(time.RFC3339), partialOutput)
 
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+		sess.appendMessage("assistant", messageContent)
 
 		autoContinue := sess.AutonomousMode
 
@@ -1335,7 +1377,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		if job.Error != "" {
 			messageContent += fmt.Sprintf("\n\nError:\n%s", job.Error)
 		}
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: messageContent})
+		sess.appendMessage("assistant", messageContent)
 
 		autoContinue := sess.AutonomousMode
 
@@ -1375,7 +1417,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			job.EndTime = time.Now()
 			jobStore.update(job)
 			content := fmt.Sprintf("Job %s cancelled", job.ID)
-			sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
+			sess.appendMessage("assistant", content)
 
 			writeJSON(w, http.StatusOK, webChatResponse{
 				SessionID:          sess.ID,
@@ -1392,7 +1434,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			})
 		} else {
 			content := fmt.Sprintf("Job %s is not running (status: %s)", job.ID, job.Status)
-			sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
+			sess.appendMessage("assistant", content)
 
 			writeJSON(w, http.StatusOK, webChatResponse{
 				SessionID:     sess.ID,
@@ -1419,7 +1461,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		if len(jobs) == 0 {
 			content = "No background jobs in this session"
 		}
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: content})
+		sess.appendMessage("assistant", content)
 
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:          sess.ID,
@@ -1443,7 +1485,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, response)
 
 	default:
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
+		sess.appendMessage("assistant", raw)
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,
 			Action:        "unknown",
@@ -1470,6 +1512,11 @@ func printStats(s *Stats) {
 	fmt.Printf("  Commands run:       %s\n", success(fmt.Sprintf("%d", s.CommandsRun)))
 	fmt.Printf("  User chars total:   %s\n", success(fmt.Sprintf("%d", s.TotalUserChars)))
 	fmt.Printf("  Assistant chars:    %s\n", success(fmt.Sprintf("%d", s.TotalAssistantChars)))
+	fmt.Printf("  Context chars:      %s\n", success(fmt.Sprintf("%d", s.ContextChars)))
+	fmt.Printf("  Context tokens:     %s\n", success(fmt.Sprintf("~%d estimated", s.EstimatedContextTokens)))
+	if s.LastResponseMillis > 0 {
+		fmt.Printf("  Last response:      %s\n", success((time.Duration(s.LastResponseMillis) * time.Millisecond).String()))
+	}
 	if s.LastCommand != "" {
 		fmt.Printf("  Last command:       %s\n", info(s.LastCommand))
 	}
@@ -1483,6 +1530,13 @@ func formatStatsPlain(s Stats) string {
 	fmt.Fprintf(&b, "- Commands run: %d\n", s.CommandsRun)
 	fmt.Fprintf(&b, "- User chars total: %d\n", s.TotalUserChars)
 	fmt.Fprintf(&b, "- Assistant chars: %d\n", s.TotalAssistantChars)
+	fmt.Fprintf(&b, "- Context chars: %d\n", s.ContextChars)
+	fmt.Fprintf(&b, "- Context tokens: ~%d (estimated)\n", s.EstimatedContextTokens)
+	if s.LastResponseMillis > 0 {
+		fmt.Fprintf(&b, "- Last response: %s\n", time.Duration(s.LastResponseMillis)*time.Millisecond)
+	} else {
+		b.WriteString("- Last response: (none)\n")
+	}
 	if s.LastCommand != "" {
 		fmt.Fprintf(&b, "- Last command: %s\n", s.LastCommand)
 	} else {
@@ -1552,6 +1606,7 @@ func printCachedBlocks() {
 }
 
 func buildSession(model string, stats *Stats) Session {
+	stats.updateContext(systemPrompt, sessionMessages)
 	return Session{
 		Timestamp:    time.Now().UTC().Format(time.RFC3339),
 		Model:        model,
@@ -1734,6 +1789,7 @@ func main() {
 		{Role: "system", Content: systemPrompt},
 	}
 	sessionMessages = append(sessionMessages, messages...)
+	stats.updateContext(systemPrompt, messages)
 
 	fmt.Println(info("Type '/q' to quit."))
 	fmt.Println(info("Type '/h' for help/shortcuts."))
@@ -1815,7 +1871,7 @@ func main() {
 				output := execCommandsFromFile(path, stats)
 				fmt.Println(output)
 				if strings.TrimSpace(output) != "" {
-					sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: output})
+					appendTerminalMessage(&messages, stats, "assistant", output)
 				}
 				continue
 			} else {
@@ -1838,14 +1894,11 @@ func main() {
 			return
 		}
 
-		messages = append(messages, ChatMessage{
-			Role:    "user",
-			Content: userInput,
-		})
-		sessionMessages = append(sessionMessages, ChatMessage{Role: "user", Content: userInput})
-		stats.recordUser(userInput)
+		appendTerminalMessage(&messages, stats, "user", userInput)
 
+		requestStarted := time.Now()
 		raw, err := callOllama(messages, false)
+		stats.recordResponseDuration(time.Since(requestStarted))
 		if err != nil {
 			fmt.Println(warn("Ollama error:"), err)
 			continue
@@ -1864,8 +1917,7 @@ func main() {
 		if err := json.Unmarshal([]byte(clean), &tool); err != nil {
 			// Model didn’t stick to JSON; just print raw
 			fmt.Println(assistantLabel(), raw)
-			messages = append(messages, ChatMessage{Role: "assistant", Content: raw})
-			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: raw})
+			appendTerminalMessage(&messages, stats, "assistant", raw)
 			continue
 		}
 
@@ -1878,17 +1930,15 @@ func main() {
 			fmt.Println(out)
 
 			// Feed result back so model can explain/continue
-			messages = append(messages, ChatMessage{
-				Role:    "assistant",
-				Content: "Command output:\n" + out,
-			})
-			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: "Command output:\n" + out})
+			appendTerminalMessage(&messages, stats, "assistant", "Command output:\n"+out)
 
 			if autoAnalyze {
 				// Ask for analysis without running more commands
 				analysisPrompt := "Analyze the command output above and summarize key points. Do not request or run additional commands."
 				analysisMessages := append(messages, ChatMessage{Role: "user", Content: analysisPrompt})
+				analysisStarted := time.Now()
 				analysisRaw, err := callOllama(analysisMessages, false)
+				stats.recordResponseDuration(time.Since(analysisStarted))
 				if err != nil {
 					fmt.Println(warn("Ollama error during analysis:"), err)
 					continue
@@ -1907,29 +1957,20 @@ func main() {
 				if err := json.Unmarshal([]byte(analysisClean), &analysis); err != nil || analysis.Action != "answer" {
 					// Fall back to printing raw analysis
 					fmt.Println(analysisLabel(), analysisRaw)
-					messages = append(messages, ChatMessage{Role: "assistant", Content: analysisRaw})
-					sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: analysisRaw})
+					appendTerminalMessage(&messages, stats, "assistant", analysisRaw)
 				} else {
 					fmt.Println(analysisLabel(), analysis.Text)
-					stats.recordAssistant(analysis.Text)
-					messages = append(messages, ChatMessage{Role: "assistant", Content: analysis.Text})
-					sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: analysis.Text})
+					appendTerminalMessage(&messages, stats, "assistant", analysis.Text)
 				}
 			}
 
 		case "answer":
 			fmt.Println(assistantLabel(), tool.Text)
-			stats.recordAssistant(tool.Text)
-			messages = append(messages, ChatMessage{
-				Role:    "assistant",
-				Content: tool.Text,
-			})
-			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: tool.Text})
+			appendTerminalMessage(&messages, stats, "assistant", tool.Text)
 
 		default:
 			fmt.Println("Assistant (unknown action):", raw)
-			messages = append(messages, ChatMessage{Role: "assistant", Content: raw})
-			sessionMessages = append(sessionMessages, ChatMessage{Role: "assistant", Content: raw})
+			appendTerminalMessage(&messages, stats, "assistant", raw)
 		}
 	}
 }

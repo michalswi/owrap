@@ -245,7 +245,9 @@ func handleAutonomousCommand(sess *webSession, tool ToolResponse, messageContent
 		{Role: "user", Content: summaryPrompt},
 	}
 
+	summaryStarted := time.Now()
 	quickSummary, err := callOllamaWithLog("quick-summary:"+sess.ID, summaryMessages, false)
+	sess.Stats.recordResponseDuration(time.Since(summaryStarted))
 	if err != nil {
 		// If summary generation fails, provide a basic one
 		if strings.Contains(out, "Error") || strings.Contains(out, "error") {
@@ -261,7 +263,7 @@ func handleAutonomousCommand(sess *webSession, tool ToolResponse, messageContent
 
 	// Add summary to conversation so model sees it
 	summaryNote := "📝 " + quickSummary
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: summaryNote})
+	sess.appendMessage("assistant", summaryNote)
 
 	// Every 3 commands, force detailed goal review. Otherwise, simple continue.
 	var analysisPrompt string
@@ -317,7 +319,7 @@ What's your NEXT command (different from above)?
 {"action":"run_command","command":"<next_command>"}`, cmdHistory)
 	}
 
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: analysisPrompt})
+	sess.appendContextMessage("user", analysisPrompt)
 
 	return webChatResponse{
 		SessionID:          sess.ID,
@@ -352,9 +354,9 @@ func handleAutonomousJSONError(sess *webSession, raw string, clean string, err e
 		systemPromptName = sess.OriginalPromptName
 		log.Printf("[AUTONOMOUS] Max retries reached, stopping autonomous mode")
 
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
+		sess.appendMessage("assistant", raw)
 		errorText := "❌ Autonomous mode stopped: Agent failed to produce valid JSON after 3 retries. Please provide clearer instructions or try a different approach."
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: errorText})
+		sess.appendMessage("assistant", errorText)
 
 		return webChatResponse{
 			SessionID:          sess.ID,
@@ -403,8 +405,8 @@ CORRECT example (what you MUST do):
 Your response must be EXACTLY that - nothing before {, nothing after }.
 Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePreview)
 
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: errorMsg})
+	sess.appendMessage("assistant", raw)
+	sess.appendContextMessage("user", errorMsg)
 
 	return webChatResponse{
 		SessionID:          sess.ID,
@@ -431,12 +433,14 @@ func handleUpdateFindings(sess *webSession, tool ToolResponse) webChatResponse {
 		}
 		log.Printf("[AUTONOMOUS] Updated findings for session %s: %s", sess.ID, tool.Text)
 	}
+	content := "✅ Saved: " + tool.Text
+	sess.appendMessage("assistant", content)
 
 	// Continue autonomous mode
 	return webChatResponse{
 		SessionID:          sess.ID,
 		Action:             "update_findings",
-		AssistantText:      "✅ Saved: " + tool.Text,
+		AssistantText:      content,
 		Messages:           sess.Messages,
 		Model:              modelName,
 		Timestamp:          time.Now().UTC(),
@@ -449,8 +453,7 @@ func handleUpdateFindings(sess *webSession, tool ToolResponse) webChatResponse {
 
 // handleAutonomousAnswer processes the answer action and stops autonomous mode
 func handleAutonomousAnswer(sess *webSession, tool ToolResponse) webChatResponse {
-	sess.Stats.recordAssistant(tool.Text)
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: tool.Text})
+	sess.appendMessage("assistant", tool.Text)
 
 	// In autonomous mode, "answer" action means goal complete - stop autonomous mode
 	wasAutonomous := sess.AutonomousMode

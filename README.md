@@ -41,7 +41,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -53,7 +53,7 @@ Available commands:
   /dir           Show current working directory
   /m             Show Ollama LLM model in use
   /up            Show app uptime
-  /s, /stats     Show session stats (counts, chars, last command)
+  /s, /stats     Show counts, chars, context estimate, timing, and last command
   /last          Show last prompt + model answer
   /myprompts     Show all your prompts from current session
   /sysprompt     Show current system prompt
@@ -121,7 +121,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -140,7 +140,7 @@ $ SYSTEM_PROMPT=./prompts/(...).txt ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -276,7 +276,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -295,6 +295,9 @@ Session stats:
   Commands run:       0
   User chars total:   23
   Assistant chars:    154
+  Context chars:      658
+  Context tokens:     ~165 estimated
+  Last response:      1.25s
 ------------------------------------------------------------
 ```
 

@@ -308,6 +308,7 @@
     .stat-tag { display: none; }
     .stat-value { margin: 4px 0 1px; color: var(--text); font-size: 23px; font-weight: 650; }
     .stat-sub { font-size: 9px; line-height: 1.4; }
+    .stat-span-2 { grid-column: span 2; }
     #modalOverlay { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(15,18,22,0.42); backdrop-filter: blur(12px); }
     #modalOverlay.show { display: flex; }
     .modal-card {
@@ -387,6 +388,7 @@
       .modal-card { width: 100%; max-height: calc(100dvh - 20px); border-radius: 10px; }
       .modal-body { padding: 10px; }
       .modal-pre { padding: 10px; font-size: 10px; }
+      .stat-span-2 { grid-column: span 1; }
     }
     @media (prefers-reduced-motion: reduce) {
       .app-window { animation: none; }
@@ -641,6 +643,11 @@
               <div class="stat-value" id="statResponseTime">-</div>
               <div class="stat-sub">last request</div>
             </div>
+            <div class="stat-card stat-span-2">
+              <div class="stat-top"><div class="stat-label">Context</div><span class="stat-tag">estimate</span></div>
+              <div class="stat-value" id="statContextTokens">~0</div>
+              <div class="stat-sub">estimated tokens · <span id="statContextChars">0</span> chars</div>
+            </div>
           </div>
         </div>
       </aside>
@@ -706,9 +713,11 @@
       commands: document.getElementById('statCommands'),
       userChars: document.getElementById('statUserChars'),
       assistantChars: document.getElementById('statAssistantChars'),
-      responseTime: document.getElementById('statResponseTime')
+      responseTime: document.getElementById('statResponseTime'),
+      contextTokens: document.getElementById('statContextTokens'),
+      contextChars: document.getElementById('statContextChars')
     };
-    const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
+    const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '', ContextChars: 0, EstimatedContextTokens: 0, LastResponseMillis: 0 };
     const STORAGE_KEY = 'owrap_ui_state_v1';
     const THEME_KEY = 'owrap_theme';
     let sessionId = '';
@@ -1187,6 +1196,9 @@
       statsEls.commands.textContent = s.CommandsRun;
       statsEls.userChars.textContent = s.TotalUserChars;
       statsEls.assistantChars.textContent = s.TotalAssistantChars;
+      statsEls.contextTokens.textContent = `~${s.EstimatedContextTokens.toLocaleString()}`;
+      statsEls.contextChars.textContent = s.ContextChars.toLocaleString();
+      statsEls.responseTime.textContent = s.LastResponseMillis > 0 ? `${(s.LastResponseMillis / 1000).toFixed(3)}s` : '-';
       if (!skipSave) saveState();
     }
 
@@ -1238,9 +1250,6 @@
         const endTime = performance.now();
         const responseTime = ((endTime - startTime) / 1000).toFixed(3);
         lastResponseTime = responseTime;
-        if (statsEls.responseTime) {
-          statsEls.responseTime.textContent = `${responseTime}s`;
-        }
         if (quickResponseTime) {
           quickResponseTime.textContent = `⏱️ ${responseTime}s`;
           quickResponseTime.style.display = 'inline';

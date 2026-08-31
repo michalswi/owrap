@@ -118,7 +118,7 @@ func printHelp() {
 	fmt.Println("  /dir           Show current working directory")
 	fmt.Println("  /m             Show Ollama LLM model in use")
 	fmt.Println("  /up            Show app uptime")
-	fmt.Println("  /s, /stats     Show session stats (counts, chars, last command)")
+	fmt.Println("  /s, /stats     Show counts, chars, context estimate, timing, and last command")
 	fmt.Println("  /last          Show last prompt + model answer")
 	fmt.Println("  /myprompts     Show all your prompts from current session")
 	fmt.Println("  /sysprompt     Show current system prompt")
@@ -176,6 +176,7 @@ func loadSession(name string, stats *Stats) error {
 
 	// Restore stats
 	*stats = session.Stats
+	stats.updateContext(systemPrompt, session.Messages)
 
 	// Restore session messages for saving
 	sessionMessages = session.Messages
