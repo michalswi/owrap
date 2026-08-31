@@ -124,7 +124,7 @@ func TestWebThinkingToggleAndResponsePersistence(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored, ok := restartedStore.active()
-	if !ok || !restored.ThinkingEnabled || restored.Messages[1].Thinking != "reasoning trace" {
+	if !ok || restored.ThinkingEnabled || restored.Messages[1].Thinking != "reasoning trace" {
 		t.Fatalf("thinking state not persisted: %+v", restored)
 	}
 }

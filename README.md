@@ -20,7 +20,7 @@
 - Works in both terminal and web UI modes
 - Keeps all interactions local on your machine (no external API calls)
 - Sends your messages to the Ollama HTTP chat endpoint with your configured model
-- Supports Ollama model reasoning with runtime `/think-on` and `/think-off` controls; Web reasoning is collapsed by default
+- Supports Ollama model reasoning with runtime `/think-on` and `/think-off` controls; thinking starts disabled and Web reasoning is collapsed by default
 - Executes [allowlisted](./comm.go#L3) shell commands when explicitly requested by the model, captures stdout/stderr, and feeds the output back to continue the conversation
 - Maintains terminal session logs with `/save` and `/load`, and automatically persists the active Web UI conversation across browsers and restarts
 - Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
@@ -109,6 +109,14 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
   - Falls back to default if the file cannot be read
   - Find more about available prompts [here](#-system-prompts)
 - **Web UI port**: `:8080` (override with env var `WEB_BIND`)
+
+### > thinking mode
+
+Thinking mode is disabled whenever OWRAP starts. Use `/think-on` and `/think-off` at runtime; the setting applies to subsequent model requests without restarting the app. In the Web UI, the selected control and status badge are green when thinking is enabled and amber when it is disabled.
+
+Models that support Ollama reasoning return it separately from the final answer. The Web UI displays this content under a collapsed **Model reasoning** section. Reasoning remains available with the persisted conversation across browsers and restarts, while the thinking toggle itself resets to disabled after an app restart. Models without thinking support continue normally and simply return no reasoning section.
+
+Persisted reasoning contributes to assistant-character and estimated-context statistics.
 
 ### > run app [terminal version]
 

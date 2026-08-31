@@ -260,6 +260,26 @@
     #stopResponse { display: none; color: #fff; background: #ff453a !important; border-color: #ff453a; }
     #clearChat { color: #ff453a; background: rgba(255,69,58,0.08) !important; border-color: rgba(255,69,58,0.22); }
     #showHelp { grid-column: 1 / -1; }
+    #thinkOn.mode-active { color: #fff; background: #28a745 !important; border-color: #28a745; opacity: 1; }
+    #thinkOff.mode-active { color: #422b00; background: #ffcc66 !important; border-color: #e5ad3d; opacity: 1; }
+    .thinking-status {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 28px;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    .thinking-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
+    .thinking-status.enabled { color: #187a32; background: rgba(40,167,69,0.1); border-color: rgba(40,167,69,0.28); }
+    .thinking-status.enabled::before { background: #28a745; box-shadow: 0 0 0 3px rgba(40,167,69,0.12); }
+    .thinking-status.disabled { color: #8a5a00; background: rgba(255,204,102,0.12); border-color: rgba(229,173,61,0.3); }
+    .thinking-status.disabled::before { background: #e5ad3d; box-shadow: 0 0 0 3px rgba(229,173,61,0.12); }
     #autonomousStart { grid-column: 1 / -1; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
     #autonomousStop { grid-column: 1 / -1; color: #fff; background: #ff453a !important; border-color: #ff453a; }
     .file-upload-btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 5px; }
@@ -614,7 +634,7 @@
               <button id="autoOff" type="button">Analysis off</button>
               <button id="thinkOn" type="button">Thinking on</button>
               <button id="thinkOff" type="button">Thinking off</button>
-              <span id="thinkingState" class="composer-hint">Thinking: off</span>
+              <div id="thinkingState" class="thinking-status disabled" role="status" aria-live="polite">Thinking disabled</div>
               <button id="autonomousStart" type="button">Start autonomous</button>
               <button id="autonomousStop" type="button" style="display: none;">Stop autonomous</button>
             </div>
@@ -1518,7 +1538,13 @@
 
     function setThinkingState(enabled) {
       thinkingEnabled = enabled;
-      thinkingStateEl.textContent = `Thinking: ${enabled ? 'on' : 'off'}`;
+      thinkingStateEl.textContent = `Thinking ${enabled ? 'enabled' : 'disabled'}`;
+      thinkingStateEl.classList.toggle('enabled', enabled);
+      thinkingStateEl.classList.toggle('disabled', !enabled);
+      thinkOnBtn.classList.toggle('mode-active', enabled);
+      thinkOffBtn.classList.toggle('mode-active', !enabled);
+      thinkOnBtn.setAttribute('aria-pressed', enabled.toString());
+      thinkOffBtn.setAttribute('aria-pressed', (!enabled).toString());
       thinkOnBtn.disabled = enabled;
       thinkOffBtn.disabled = !enabled;
     }

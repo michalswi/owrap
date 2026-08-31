@@ -146,6 +146,7 @@ func (s *webSessionStore) load() error {
 	if state.Session == nil || state.Session.ID == "" {
 		return nil
 	}
+	state.Session.ThinkingEnabled = false
 	state.Session.Stats.updateContext(systemPrompt, state.Session.Messages)
 	s.mu.Lock()
 	defer s.mu.Unlock()

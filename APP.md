@@ -93,11 +93,11 @@ or:
 
 In normal chat, malformed or plain-text model output is displayed as an answer. In autonomous mode, valid JSON is mandatory and malformed output enters a retry flow.
 
-The HTTP client currently uses `http.Post` without a request timeout and does not explicitly reject non-success HTTP status codes before decoding the response.
+The HTTP client creates context-aware requests, so Web request cancellation propagates to Ollama. It uses the default HTTP client without a fixed timeout and does not explicitly reject non-success HTTP status codes before decoding the response.
 
 ## Core Data Model
 
-`ChatMessage` contains a `role` and `content` and is the shared conversation unit.
+`ChatMessage` contains `role`, `content`, and optional `thinking` fields and is the shared conversation unit. Reasoning remains separate from visible answer content.
 
 `Stats` tracks:
 
@@ -105,7 +105,8 @@ The HTTP client currently uses `http.Post` without a request timeout and does no
 - Assistant-message count.
 - Commands run.
 - Total user characters.
-- Total assistant characters.
+- Total assistant characters, including retained reasoning.
+- Current context characters and estimated tokens, including retained reasoning.
 - Last command.
 
 `Session` is the disk representation: timestamp, model, messages, stats, and CLI cached blocks.
@@ -194,7 +195,7 @@ HTTP endpoints:
 
 Web chat recognizes `/auto-on`, `/auto-off`, `/think-on`, `/think-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
 
-The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, renders returned reasoning in a collapsed disclosure, and drives autonomous continuation by issuing repeated `/api/chat` requests when `autonomousContinue` is true. The active Web thinking mode and returned reasoning persist in `~/.owrap/web_state.json` across browsers and restarts.
+The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, renders returned reasoning in a collapsed disclosure, and drives autonomous continuation by issuing repeated `/api/chat` requests when `autonomousContinue` is true. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts. Models that omit `message.thinking` remain compatible and produce no reasoning disclosure.
 
 ## Prompt System
 
