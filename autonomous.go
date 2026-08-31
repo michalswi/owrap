@@ -59,9 +59,11 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	if req.File != nil {
 		sess.AttachedFile = req.File
 
-		// Create temp directory for this session's files
-		tempDir := filepath.Join("/tmp", "owrap_autonomous_files", sess.ID)
-		if err := os.MkdirAll(tempDir, 0755); err != nil {
+		// Create application directory for this session's files
+		tempDir, err := owrapAutonomousSessionDir(sess.ID)
+		if err != nil {
+			log.Printf("[AUTONOMOUS] Warning: failed to resolve storage dir: %v", err)
+		} else if err := os.MkdirAll(tempDir, 0755); err != nil {
 			log.Printf("[AUTONOMOUS] Warning: failed to create temp dir: %v", err)
 		} else {
 			// Write file to temp directory
@@ -156,8 +158,10 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 
 	// Clean up temp file if exists
 	if sess.AttachedFilePath != "" {
-		tempDir := filepath.Join("/tmp", "owrap_autonomous_files", sess.ID)
-		if err := os.RemoveAll(tempDir); err != nil {
+		tempDir, err := owrapAutonomousSessionDir(sess.ID)
+		if err != nil {
+			log.Printf("[AUTONOMOUS] Warning: failed to resolve storage dir: %v", err)
+		} else if err := os.RemoveAll(tempDir); err != nil {
 			log.Printf("[AUTONOMOUS] Warning: failed to clean up temp dir: %v", err)
 		} else {
 			log.Printf("[AUTONOMOUS] Cleaned up temp directory: %s", tempDir)

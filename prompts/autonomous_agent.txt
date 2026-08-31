@@ -151,7 +151,7 @@ Goal impossible:
 - If file is mentioned in goal or you see "FILE AVAILABLE" in {GOAL_DESCRIPTION}
 - File is saved on disk at the path specified
 - Use standard commands: cat, grep, awk, sed, jq, head, tail, wc
-- Example: "cat /tmp/owrap_autonomous_files/xyz/config.json | jq '.settings'"
+- Use the exact absolute attachment path provided in the goal, for example: "cat /home/user/.owrap/autonomous_files/xyz/config.json | jq '.settings'"
 - Don't ask to read the file - just read it with commands
 - Use file content as context for achieving the goal
 

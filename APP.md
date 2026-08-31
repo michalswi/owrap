@@ -26,7 +26,7 @@ Keep these boundaries in mind when reasoning about the app:
 - OWRAP has no database, user accounts, authentication, authorization, or multi-node coordination.
 - The browser UI is a single embedded HTML file with inline CSS and vanilla JavaScript.
 - CLI state is process-global. Web chat state is held in an in-memory session map.
-- Saved sessions are plain JSON files under `/tmp/sessions`.
+- Saved sessions are plain JSON files under `~/.owrap/sessions`.
 - Command execution occurs with the operating-system permissions of the OWRAP process.
 - The app is described as local-first, but network commands may access remote systems, `OLLAMA_URL` may point to a remote host, and the default web bind `:8080` may listen on all interfaces.
 
@@ -154,7 +154,7 @@ CLI slash commands include:
 | `/myprompts` | List user messages in the current session |
 | `/sysprompt` | Print the current global system prompt |
 | `/editsysprompt` | Select a prompt file or enter a custom prompt |
-| `/save [NAME]` | Save JSON under `/tmp/sessions` |
+| `/save [NAME]` | Save JSON under `~/.owrap/sessions` |
 | `/load NAME` | Restore messages, stats, and cached blocks |
 | `/sessions`, `/list` | List saved session files |
 | `/p [DELIM]`, `/paste [DELIM]` | Read a multiline block, default delimiter `EOF` |
@@ -188,7 +188,7 @@ HTTP endpoints:
 | `GET /api/health` | Return HTTP 200 if the OWRAP server is running |
 | `GET /api/ollama/status` | Probe Ollama's `/api/tags` endpoint with a two-second timeout |
 
-Web chat recognizes `/auto-on`, `/auto-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `/tmp/sessions` format as CLI mode.
+Web chat recognizes `/auto-on`, `/auto-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
 
 The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and drives autonomous continuation by issuing repeated `/api/chat` requests when `autonomousContinue` is true.
 
@@ -249,7 +249,7 @@ Autonomous mode is beta and web-only. Its intended lifecycle is:
 
 1. The browser submits a required goal and optional file attachment.
 2. The server creates or reuses a web session and remembers the current global prompt.
-3. Attachment content is written under `/tmp/owrap_autonomous_files/<session-id>/`.
+3. Attachment content is written under `~/.owrap/autonomous_files/<session-id>/`.
 4. `prompts/autonomous_agent.txt` is loaded and its goal/history placeholders are replaced.
 5. The browser initiates chat and automatically continues while instructed by API responses.
 6. Ollama is forced into JSON output mode.
@@ -272,7 +272,7 @@ The autonomous prompt is designed for larger local models and insists on a singl
 
 ## Persistence and Lifecycle
 
-CLI and web saves use JSON files in `/tmp/sessions`. An omitted name produces `owrap_YYYYMMDD_HHMM.json`; a supplied name receives `.json` if needed. Files are sorted alphabetically when listed.
+CLI and web saves use JSON files in `~/.owrap/sessions`. An omitted name produces `owrap_YYYYMMDD_HHMM.json`; a supplied name receives `.json` if needed. Files are sorted alphabetically when listed.
 
 Web sessions and jobs have no eviction or expiry. They remain in memory until process exit. Server restart loses unsaved web state and all job metadata.
 
@@ -343,7 +343,7 @@ Think of OWRAP as five cooperating layers:
 2. **Conversation layer:** system prompt plus `ChatMessage` history and stats.
 3. **Model layer:** non-streaming Ollama `/api/chat` calls using a small JSON action protocol.
 4. **Action layer:** synchronous commands, background jobs, analysis calls, and autonomous state transitions.
-5. **Persistence layer:** in-memory web stores, browser local storage, and JSON files under `/tmp`.
+5. **Persistence layer:** in-memory web stores, browser local storage, and application files under `~/.owrap`.
 
 A normal request moves from interface to conversation to Ollama, then either returns an answer or enters command execution. Autonomous mode repeats that path under a strict JSON prompt until a final `answer`, a manual stop, or three invalid-JSON responses end the loop.
 

@@ -83,7 +83,7 @@ func handleSlashCommand(input string, stats *Stats) bool {
 			return true
 		}
 		if len(sessions) == 0 {
-			fmt.Println(info("No saved sessions found in /tmp/sessions"))
+			fmt.Println(info("No saved sessions found in ~/.owrap/sessions"))
 		} else {
 			fmt.Println(accent(fmt.Sprintf("Saved sessions (%d):", len(sessions))))
 			for _, name := range sessions {
@@ -123,9 +123,9 @@ func printHelp() {
 	fmt.Println("  /myprompts     Show all your prompts from current session")
 	fmt.Println("  /sysprompt     Show current system prompt")
 	fmt.Println("  /editsysprompt Edit system prompt (select from files or write custom)")
-	fmt.Println("  /save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)")
+	fmt.Println("  /save [NAME]   Save current session to ~/.owrap/sessions (auto-named if NAME omitted)")
 	fmt.Println("  /load NAME     Load a saved session by name")
-	fmt.Println("  /sessions      List all saved sessions in /tmp/sessions")
+	fmt.Println("  /sessions      List all saved sessions in ~/.owrap/sessions")
 	fmt.Println("  /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)")
 	fmt.Println("  /cache         List cached (not sent) blocks")
 	fmt.Println("  /use N         Send cached block #N (1-based) with optional question")

@@ -623,6 +623,30 @@ func ternary(cond bool, a, b string) string {
 	return b
 }
 
+func owrapHomeDir() (string, error) {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve user home directory: %w", err)
+	}
+	return filepath.Join(homeDir, ".owrap"), nil
+}
+
+func owrapSessionsDir() (string, error) {
+	baseDir, err := owrapHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(baseDir, "sessions"), nil
+}
+
+func owrapAutonomousSessionDir(sessionID string) (string, error) {
+	baseDir, err := owrapHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(baseDir, "autonomous_files", sessionID), nil
+}
+
 // splitRedirection extracts a single stdout redirection (> or >> filename) if present.
 func splitRedirection(fields []string) (args []string, redirectFile string, appendMode bool, err error) {
 	for i := 0; i < len(fields); i++ {
@@ -1017,7 +1041,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				text = fmt.Sprintf("Failed to list sessions: %v", err)
 			} else if len(sessions) == 0 {
-				text = "No saved sessions found in /tmp/sessions"
+				text = "No saved sessions found in ~/.owrap/sessions"
 			} else {
 				text = fmt.Sprintf("Saved sessions (%d):\n", len(sessions))
 				for _, name := range sessions {
@@ -1523,9 +1547,12 @@ func buildSession(model string, stats *Stats) Session {
 	}
 }
 
-// saveSessionToFile saves the provided Session as a named JSON file in /tmp/sessions.
+// saveSessionToFile saves the provided Session as a named JSON file in ~/.owrap/sessions.
 func saveSessionToFile(session Session, name string) (string, error) {
-	sessionsDir := "/tmp/sessions"
+	sessionsDir, err := owrapSessionsDir()
+	if err != nil {
+		return "", err
+	}
 	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create sessions directory: %w", err)
 	}
@@ -1553,9 +1580,12 @@ func saveSessionToFile(session Session, name string) (string, error) {
 	return filename, nil
 }
 
-// loadSessionFromFile loads a session from /tmp/sessions by name.
+// loadSessionFromFile loads a session from ~/.owrap/sessions by name.
 func loadSessionFromFile(name string) (*Session, error) {
-	sessionsDir := "/tmp/sessions"
+	sessionsDir, err := owrapSessionsDir()
+	if err != nil {
+		return nil, err
+	}
 	if !strings.HasSuffix(name, ".json") {
 		name = name + ".json"
 	}
@@ -1574,9 +1604,12 @@ func loadSessionFromFile(name string) (*Session, error) {
 	return &session, nil
 }
 
-// listSessions returns a list of saved session files in /tmp/sessions.
+// listSessions returns a list of saved session files in ~/.owrap/sessions.
 func listSessions() ([]string, error) {
-	sessionsDir := "/tmp/sessions"
+	sessionsDir, err := owrapSessionsDir()
+	if err != nil {
+		return nil, err
+	}
 	entries, err := os.ReadDir(sessionsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1597,7 +1630,14 @@ func listSessions() ([]string, error) {
 
 func saveWebSession(sess *webSession) (string, error) {
 	timestamp := time.Now().UTC().Format("20060102_1504")
-	filename := filepath.Join("/tmp", fmt.Sprintf("owrap_web_%s.json", timestamp))
+	sessionsDir, err := owrapSessionsDir()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(sessionsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create sessions directory: %w", err)
+	}
+	filename := filepath.Join(sessionsDir, fmt.Sprintf("owrap_web_%s.json", timestamp))
 	payload := Session{
 		Timestamp:    time.Now().UTC().Format(time.RFC3339),
 		Model:        modelName,

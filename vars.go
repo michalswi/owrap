@@ -40,9 +40,9 @@ const webHelpText = `Web UI commands:
 /myprompts     Show all your prompts from current session (click to reuse)
 /auto-on       Enable automatic analysis after commands
 /auto-off      Disable automatic analysis after commands
-/save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
+/save [NAME]   Save current session to ~/.owrap/sessions (auto-named if NAME omitted)
 /load NAME     Load a saved session by name
-/sessions      List all saved sessions in /tmp/sessions
+/sessions      List all saved sessions in ~/.owrap/sessions
 /last          Show last prompt and assistant reply
 /stats         Show live session stats (also visible in UI)
 /allowedcomm   Show the allowlisted shell commands

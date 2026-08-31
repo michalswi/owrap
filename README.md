@@ -21,7 +21,7 @@
 - Keeps all interactions local on your machine (no external API calls)
 - Sends your messages to the Ollama HTTP chat endpoint with your configured model
 - Executes [allowlisted](./comm.go#L3) shell commands when explicitly requested by the model, captures stdout/stderr, and feeds the output back to continue the conversation
-- Maintains session logs (user/assistant messages, statistics) in memory with `/save` and `/load` support for `/tmp/sessions`
+- Maintains session logs (user/assistant messages, statistics) in memory with `/save` and `/load` support for `~/.owrap/sessions`
 - Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
 - Supports **file uploads** in web UI - upload text/code files for one-time analysis with custom prompts
 - Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button). More [here](#-system-prompts)
@@ -58,9 +58,9 @@ Available commands:
   /myprompts     Show all your prompts from current session
   /sysprompt     Show current system prompt
   /editsysprompt Edit system prompt (select from files or write custom)
-  /save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
+  /save [NAME]   Save current session to ~/.owrap/sessions (auto-named if NAME omitted)
   /load NAME     Load a saved session by name
-  /sessions      List all saved sessions in /tmp/sessions
+  /sessions      List all saved sessions in ~/.owrap/sessions
   /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)
   /cache         List cached (not sent) blocks
   /use N         Send cached block #N (1-based) with optional question
@@ -252,7 +252,7 @@ Because it's **beta version** it would require more work to improve the way how 
 - **Continuous Operation**: Agent executes commands, analyzes results, and plans next steps automatically without user intervention
 - **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
 - **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
-  - Files are saved to `/tmp/owrap_autonomous_files/<sessionId>/`
+  - Files are saved to `~/.owrap/autonomous_files/<sessionId>/`
   - Agent can use command-line tools (cat, grep, jq, awk, etc.) to analyze attached files
   - Useful for tasks like "analyze this log file and identify errors" or "create a report based on this configuration"
 - **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
