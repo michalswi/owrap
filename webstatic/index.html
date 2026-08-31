@@ -254,6 +254,7 @@
       background: var(--accent-2) !important;
       border-color: var(--accent-2);
     }
+    #stopResponse { display: none; color: #fff; background: #ff453a !important; border-color: #ff453a; }
     #clearChat { color: #ff453a; background: rgba(255,69,58,0.08) !important; border-color: rgba(255,69,58,0.22); }
     #showHelp { grid-column: 1 / -1; }
     #autonomousStart { grid-column: 1 / -1; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
@@ -261,7 +262,11 @@
     .file-upload-btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 5px; }
     .file-upload-btn input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     .info-icon { width: 15px; height: 15px; margin-left: 2px; color: var(--muted); background: rgba(128,128,128,0.14); font-size: 9px; }
-    .file-name { display: block; max-width: 100%; margin: 8px 0 0; font-size: 10px; text-align: center; }
+    .file-attachment-state { display: none; align-items: center; gap: 7px; margin-top: 8px; }
+    .file-attachment-state.visible { display: flex; }
+    .file-name { min-width: 0; flex: 1; color: var(--success); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-attachment-state.disabled .file-name { color: var(--muted); }
+    #toggleAttachedFile { min-height: 26px; padding: 4px 8px; flex: 0 0 auto; font-size: 9px; }
     .composer-panel { padding: 13px; }
     label { margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
     textarea, input[type="text"] {
@@ -557,6 +562,7 @@
           <div class="composer-actions">
             <div class="row">
               <button id="send">Send</button>
+              <button id="stopResponse" type="button">Stop</button>
               <button id="clearChat" type="button">Clear</button>
               <div id="sendSpinner" class="spinner" aria-hidden="true"></div>
               <span id="quickResponseTime" style="font-size:10px; color:var(--accent); font-weight:600; display:none;">0.000s</span>
@@ -581,7 +587,10 @@
               </button>
               <button id="showMyPrompts" type="button">My prompts</button>
             </div>
-            <span id="fileName" class="file-name"></span>
+            <div class="file-attachment-state" id="fileAttachmentState">
+              <span id="fileName" class="file-name"></span>
+              <button id="toggleAttachedFile" type="button">Disable file</button>
+            </div>
           </div>
           <div class="toolbar-group">
             <div class="toolbar-label">Session</div>
@@ -652,6 +661,7 @@
     const logEl = document.getElementById('log');
     const msgEl = document.getElementById('msg');
     const sendBtn = document.getElementById('send');
+    const stopResponseBtn = document.getElementById('stopResponse');
     const promptBtn = document.getElementById('showPrompt');
     const editPromptBtn = document.getElementById('editPrompt');
     const helpBtn = document.getElementById('showHelp');
@@ -682,7 +692,9 @@
     const ollamaStatusText = document.getElementById('ollamaStatusText');
     const themeToggle = document.getElementById('themeToggle');
     const fileUpload = document.getElementById('fileUpload');
+    const fileAttachmentState = document.getElementById('fileAttachmentState');
     const fileNameDisplay = document.getElementById('fileName');
+    const toggleAttachedFileBtn = document.getElementById('toggleAttachedFile');
     const fileUploadInfo = document.getElementById('fileUploadInfo');
     const autonomousGoalBanner = document.getElementById('autonomousGoalBanner');
     const autonomousGoalText = document.getElementById('autonomousGoalText');
@@ -704,9 +716,11 @@
     let restoringState = false;
     let lastResponseTime = null;
     let pendingFile = null;
+    let pendingFileEnabled = false;
     let lastUserMessage = ''; // Track last user message for UI feedback
     let isAutonomousActive = false; // Track if autonomous mode is currently running
     let isRequestInProgress = false; // Track if a sendText request is in progress
+    let activeRequestController = null;
     let stopRequested = false; // Track if user clicked /autostop
     let showStopMessageAfterResponse = false; // Track if we need to show stop message after response displays
     let restoredPromptName = ''; // Store the restored prompt name for display after response
@@ -734,6 +748,9 @@
       if (e.key === 'Escape') closeModal();
     });
     clearBtn.addEventListener('click', clearChat);
+    stopResponseBtn.addEventListener('click', () => {
+      if (activeRequestController) activeRequestController.abort();
+    });
     saveBtn.addEventListener('click', showSaveDialog);
     loadBtn.addEventListener('click', showLoadDialog);
     listBtn.addEventListener('click', () => sendText('/sessions'));
@@ -802,14 +819,15 @@
 
     function showFileUploadInfo() {
       const infoHtml = `
-        <div class="modal-subtitle">One-time file analysis workflow</div>
+        <div class="modal-subtitle">Reusable file context</div>
         <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
           <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">How it works:</div>
           <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
-            <li>Click "📎 Upload File" and select a file</li>
+            <li>Click "Attach file" and select a file</li>
             <li>Write a prompt (e.g., "summarize", "find bugs", "explain")</li>
             <li>Click Send - file content is sent to Ollama with your prompt</li>
-            <li>File is cleared after sending (one-time analysis)</li>
+            <li>The file remains active for later messages until you disable it</li>
+            <li>Use Enable file to reuse the loaded file without selecting it again</li>
           </ol>
         </div>
         <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
@@ -978,9 +996,9 @@
         quickResponseTime.style.display = 'none';
       }
       pendingFile = null;
+      pendingFileEnabled = false;
       fileUpload.value = '';
-      fileNameDisplay.textContent = '';
-      fileNameDisplay.style.color = 'var(--muted)';
+      updateAttachedFileUI();
       msgEl.placeholder = 'Type a message or command for the assistant.';
       saveState();
     }
@@ -1174,12 +1192,12 @@
 
     async function send() {
       let text = msgEl.value.trim();
-      if (!text && !pendingFile) return;
+      if (!text && !(pendingFile && pendingFileEnabled)) return;
       
       let displayText = text;
       let apiText = text;
       
-      if (pendingFile) {
+      if (pendingFile && pendingFileEnabled) {
         const fileInfo = `[File: ${pendingFile.name}, Size: ${(pendingFile.size / 1024).toFixed(1)} KB]`;
         const userPrompt = text || 'Please analyze this file.';
         
@@ -1189,12 +1207,6 @@
         // For API: send prompt + file info + full content
         apiText = `${userPrompt}\n\n${fileInfo}\n\n${pendingFile.content}`;
         
-        // Clear pending file
-        pendingFile = null;
-        fileUpload.value = '';
-        fileNameDisplay.textContent = '';
-        fileNameDisplay.style.color = 'var(--muted)';
-        msgEl.placeholder = 'Type a message or command for the assistant.';
       }
       
       await sendText(apiText, true, displayText);
@@ -1212,13 +1224,16 @@
       
       // Track last user message for UI feedback
       lastUserMessage = text;
+      const requestController = new AbortController();
+      activeRequestController = requestController;
       
       const startTime = performance.now();
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message: text })
+          body: JSON.stringify({ sessionId, message: text }),
+          signal: requestController.signal
         });
         const endTime = performance.now();
         const responseTime = ((endTime - startTime) / 1000).toFixed(3);
@@ -1375,8 +1390,13 @@
           }
         }
       } catch (e) {
-        appendLine('Network error: ' + e, 'error');
+        if (e.name === 'AbortError') {
+          appendLine('Response stopped.', 'plain');
+        } else {
+          appendLine('Network error: ' + e, 'error');
+        }
       } finally {
+        if (activeRequestController === requestController) activeRequestController = null;
         isRequestInProgress = false;
         
         // Show stop message after response if stop was requested during this request
@@ -1398,6 +1418,7 @@
 
     function setSending(active) {
       sendBtn.disabled = active;
+      stopResponseBtn.style.display = active ? 'inline-flex' : 'none';
       sendSpinner.classList.toggle('visible', active);
       sendSpinner.setAttribute('aria-hidden', (!active).toString());
     }
@@ -1790,11 +1811,12 @@
       autoOnBtn.disabled = true;
       autoOffBtn.disabled = true;
       document.querySelector('.file-upload-btn').disabled = true;
+      toggleAttachedFileBtn.disabled = true;
       fileUpload.disabled = true;
       
       // Apply disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
-                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn'), toggleAttachedFileBtn];
       buttons.forEach(btn => {
         btn.style.opacity = '0.5';
         btn.style.cursor = 'not-allowed';
@@ -1815,11 +1837,12 @@
       autoOnBtn.disabled = false;
       autoOffBtn.disabled = false;
       document.querySelector('.file-upload-btn').disabled = false;
+      toggleAttachedFileBtn.disabled = false;
       fileUpload.disabled = false;
       
       // Remove disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
-                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn'), toggleAttachedFileBtn];
       buttons.forEach(btn => {
         btn.style.opacity = '';
         btn.style.cursor = '';
@@ -1835,12 +1858,32 @@
         .replace(/'/g, '&#39;');
     }
 
+    function updateAttachedFileUI() {
+      const hasFile = pendingFile !== null;
+      fileAttachmentState.classList.toggle('visible', hasFile);
+      fileAttachmentState.classList.toggle('disabled', hasFile && !pendingFileEnabled);
+      if (!hasFile) {
+        fileNameDisplay.textContent = '';
+        fileNameDisplay.removeAttribute('title');
+        return;
+      }
+      const state = pendingFileEnabled ? 'Active' : 'Disabled';
+      fileNameDisplay.textContent = `${pendingFile.name} (${(pendingFile.size / 1024).toFixed(1)} KB) - ${state}`;
+      fileNameDisplay.title = fileNameDisplay.textContent;
+      toggleAttachedFileBtn.textContent = pendingFileEnabled ? 'Disable file' : 'Enable file';
+      toggleAttachedFileBtn.setAttribute('aria-pressed', String(pendingFileEnabled));
+    }
+
+    toggleAttachedFileBtn.addEventListener('click', () => {
+      if (!pendingFile) return;
+      pendingFileEnabled = !pendingFileEnabled;
+      updateAttachedFileUI();
+      msgEl.focus();
+    });
+
     fileUpload.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
-      fileNameDisplay.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Ready`;
-      fileNameDisplay.style.color = 'var(--success)';
       
       try {
         const content = await readFileContent(file);
@@ -1850,14 +1893,16 @@
           type: file.type,
           content: content
         };
+        pendingFileEnabled = true;
+        updateAttachedFileUI();
         msgEl.placeholder = `What would you like me to do with ${file.name}?`;
         msgEl.focus();
       } catch (err) {
         appendLine(`Error reading file: ${err.message}`, 'error');
-        fileNameDisplay.textContent = '';
-        fileNameDisplay.style.color = 'var(--muted)';
         e.target.value = '';
         pendingFile = null;
+        pendingFileEnabled = false;
+        updateAttachedFileUI();
       }
     });
 

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -255,6 +256,10 @@ func allowedCommandsList() []string {
 }
 
 func callOllama(messages []ChatMessage, forceJSON bool) (string, error) {
+	return callOllamaContext(context.Background(), messages, forceJSON)
+}
+
+func callOllamaContext(ctx context.Context, messages []ChatMessage, forceJSON bool) (string, error) {
 	reqBody := ChatRequest{
 		Model:    modelName,
 		Messages: messages,
@@ -268,7 +273,12 @@ func callOllama(messages []ChatMessage, forceJSON bool) (string, error) {
 		return "", err
 	}
 
-	resp, err := http.Post(ollamaURL, "application/json", &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ollamaURL, &buf)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return "", err
 	}
@@ -282,8 +292,12 @@ func callOllama(messages []ChatMessage, forceJSON bool) (string, error) {
 }
 
 func callOllamaWithLog(origin string, messages []ChatMessage, forceJSON bool) (string, error) {
+	return callOllamaWithLogContext(context.Background(), origin, messages, forceJSON)
+}
+
+func callOllamaWithLogContext(ctx context.Context, origin string, messages []ChatMessage, forceJSON bool) (string, error) {
 	start := time.Now()
-	resp, err := callOllama(messages, forceJSON)
+	resp, err := callOllamaContext(ctx, messages, forceJSON)
 	dur := time.Since(start)
 	jsonMode := ""
 	if forceJSON {
@@ -1075,7 +1089,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 	// Force JSON mode only in autonomous mode
 	forceJSON := sess.AutonomousMode
-	raw, err := callOllamaWithLog("web-chat:"+sess.ID, messages, forceJSON)
+	raw, err := callOllamaWithLogContext(r.Context(), "web-chat:"+sess.ID, messages, forceJSON)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("ollama error: %v", err), http.StatusBadGateway)
 		return
@@ -1174,7 +1188,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			}
 
 			analysisMessages := []ChatMessage{analysisSystemMsg, analysisUserMsg}
-			analysisRaw, err := callOllamaWithLog("web-chat-analysis:"+sess.ID, analysisMessages, false)
+			analysisRaw, err := callOllamaWithLogContext(r.Context(), "web-chat-analysis:"+sess.ID, analysisMessages, false)
 			if err == nil {
 				analysisText := strings.TrimSpace(analysisRaw)
 
