@@ -20,10 +20,11 @@
 - Works in both terminal and web UI modes
 - Keeps all interactions local on your machine (no external API calls)
 - Sends your messages to the Ollama HTTP chat endpoint with your configured model
+- Supports Ollama model reasoning with runtime `/think-on` and `/think-off` controls; thinking starts disabled and Web reasoning is collapsed by default
 - Executes [allowlisted](./comm.go#L3) shell commands when explicitly requested by the model, captures stdout/stderr, and feeds the output back to continue the conversation
-- Maintains session logs (user/assistant messages, statistics) in memory with `/save` and `/load` support for `/tmp/sessions`
+- Maintains terminal session logs with `/save` and `/load`, and automatically persists the active Web UI conversation across browsers and restarts
 - Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
-- Supports **file uploads** in web UI - upload text/code files for one-time analysis with custom prompts
+- Supports **file uploads** in web UI - reuse text/code files across prompts and enable or disable attached context
 - Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button). More [here](#-system-prompts)
 - [beta version] Features **autonomous mode** in web UI - agent continuously works toward user-defined goals, executing commands, analyzing files, collecting information, and generating reports until completion. Supports optional file attachments as reference/knowledge base. More [here](#-autonomous-mode)
 
@@ -41,7 +42,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -53,19 +54,21 @@ Available commands:
   /dir           Show current working directory
   /m             Show Ollama LLM model in use
   /up            Show app uptime
-  /s, /stats     Show session stats (counts, chars, last command)
+  /s, /stats     Show counts, chars, context estimate, timing, and last command
   /last          Show last prompt + model answer
   /myprompts     Show all your prompts from current session
   /sysprompt     Show current system prompt
   /editsysprompt Edit system prompt (select from files or write custom)
-  /save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)
+  /save [NAME]   Save current session to ~/.owrap/sessions (auto-named if NAME omitted)
   /load NAME     Load a saved session by name
-  /sessions      List all saved sessions in /tmp/sessions
+  /sessions      List all saved sessions in ~/.owrap/sessions
   /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)
   /cache         List cached (not sent) blocks
   /use N         Send cached block #N (1-based) with optional question
   /auto-on       LLM auto-analyzes command output after execution
   /auto-off      [default] No LLM auto-analysis after command execution
+  /think-on      Ask supported models to return reasoning
+  /think-off     [default] Disable model reasoning
   /execfile P    Execute each non-empty line in file P (no analysis)
 Model-run allowed commands:
   [ansible, arp, cat, chmod, curl, date, df, dig, echo, ffuf, find, for, grep, head, httpx, ip, jq, ls, nc, netcat, nmap, nslookup, openssl, ping, pwd, sh, sort, subfinder, tail, telnet, terraform, traceroute, tree, uniq, uptime, wc, wget, while, whois, xargs]
@@ -88,16 +91,17 @@ App requires that Ollama is up and running, e.g.
 $ ollama serve
 (...)
 
-$ ollama pull gemma3:4b
+$ ollama pull qwen3.5:0.8b
 
 $ ollama ls
 NAME                  ID              SIZE      MODIFIED
-gemma3:4b             a2af6cc3eb7f    3.3 GB    5 days ago
+qwen3.5:0.8b          f3817196d142    1.0 GB    2 months ago
+gemma3:4b             a2af6cc3eb7f    3.3 GB    2 months ago
 llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
 ```
 
 - **URL** to connect to Ollama: `http://localhost:11434/api/chat` (override with env var `OLLAMA_URL`)
-- **LLM model**: `gemma3:4b` (override with env var `OLLAMA_MODEL`)
+- **LLM model**: `qwen3.5:0.8b` (override with env var `OLLAMA_MODEL`)
 - **System prompt**: Defined [here](./vars.go) by default. You can:
   - Set `SYSTEM_PROMPT` env var to a prompt file path (e.g., `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt`) to load at startup
   - Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI) to change it at runtime
@@ -105,6 +109,14 @@ llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
   - Falls back to default if the file cannot be read
   - Find more about available prompts [here](#-system-prompts)
 - **Web UI port**: `:8080` (override with env var `WEB_BIND`)
+
+### > thinking mode
+
+Thinking mode is disabled whenever OWRAP starts. Use `/think-on` and `/think-off` at runtime; the setting applies to subsequent model requests without restarting the app. In the Web UI, the selected control and status badge are green when thinking is enabled and amber when it is disabled.
+
+Models that support Ollama reasoning return it separately from the final answer. The Web UI displays this content under a collapsed **Model reasoning** section. Reasoning remains available with the persisted conversation across browsers and restarts, while the thinking toggle itself resets to disabled after an app restart. Models without thinking support continue normally and simply return no reasoning section.
+
+Persisted reasoning contributes to assistant-character and estimated-context statistics.
 
 ### > run app [terminal version]
 
@@ -120,7 +132,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -139,7 +151,7 @@ $ SYSTEM_PROMPT=./prompts/(...).txt ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -153,7 +165,7 @@ $ you might use predefined system prompts from ./prompts,
 include 'prompts' dir in the same folder where 'owrap' app
 
 $ ./owrap -web
-2025/12/28 16:19:44 web UI listening on :8080 (model=gemma3:4b, prompt=default, chars=481)
+2025/12/28 16:19:44 web UI listening on :8080 (model=qwen3.5:0.8b, prompt=default, chars=481)
 
 $ open in web browser http://localhost:8080/
 ```
@@ -236,8 +248,9 @@ Because it's **beta version** it would require more work to improve the way how 
 2. Enter your goal (e.g., "Find IP, owner, and technologies used by example.com")
 3. Optionally attach a file for reference (Choose File button)
 4. Click "🚀 Start Autonomous Work"
-5. Watch the agent work continuously until goal completion
-6. Use `/autostop` to manually stop if needed
+5. Watch the agent work continuously until it proposes a candidate answer
+6. Review the answer and choose **Continue working** or **End loop**
+7. Use `/autostop` to manually stop at any time
 
 **Example Use Cases:**
 - Network reconnaissance: "Scan 192.168.1.0/24 network and create a report of all active hosts and open ports"
@@ -248,14 +261,20 @@ Because it's **beta version** it would require more work to improve the way how 
 
 **Key Features:**
 - **Goal-Oriented**: Define a high-level objective (e.g., "analyze the network security of domain.com and create a detailed report")
+- **Selected Prompt Preserved**: Autonomous mode keeps the active default, predefined, or custom system prompt and appends its generic JSON action protocol
+- **Clean Run Context**: Each new autonomous run excludes earlier messages and resets command history, retries, and partial findings while keeping the transcript visible in the UI
 - **Continuous Operation**: Agent executes commands, analyzes results, and plans next steps automatically without user intervention
 - **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
 - **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
-  - Files are saved to `/tmp/owrap_autonomous_files/<sessionId>/`
+  - Files are saved to `~/.owrap/autonomous_files/<sessionId>/`
   - Agent can use command-line tools (cat, grep, jq, awk, etc.) to analyze attached files
   - Useful for tasks like "analyze this log file and identify errors" or "create a report based on this configuration"
 - **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
-- **Auto-Stop**: Automatically stops when goal is achieved or proven impossible
+- **User-Controlled Completion**: Candidate answers pause the loop so you can continue working or accept the result and end the loop
+- **Decision Recovery**: Refreshing the Web UI restores a pending Continue/End decision
+- **Safe Startup**: Restarting OWRAP always disables autonomous mode and clears transient autonomous state and attachments
+- **Protocol Recovery**: Invalid JSON or unsupported actions share one three-attempt retry counter. Recovery guidance allows either a direct `answer` or another supported tool action; after the third consecutive failure, OWRAP performs the same cleanup as **Stop autonomous**
+- **Job Recovery**: Missing background job IDs and job-start failures are returned to the agent as context, and the autonomous loop continues with another step
 - **Manual Control**: `/autostop` button available for manual interruption at any time
 
 **Notes:**
@@ -275,7 +294,7 @@ $ ./owrap
 ██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
 ╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.1 - @michalswi
+	v0.5.2 - @michalswi
 
 Type '/q' to quit.
 Type '/h' for help/shortcuts.
@@ -294,6 +313,9 @@ Session stats:
   Commands run:       0
   User chars total:   23
   Assistant chars:    154
+  Context chars:      658
+  Context tokens:     ~165 estimated
+  Last response:      1.25s
 ------------------------------------------------------------
 ```
 

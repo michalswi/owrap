@@ -3,21 +3,462 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>owrapUI</title>
+  <title>owrap</title>
   <base href="/static/webstatic/">
   <link rel="icon" href="img/favicon.png" type="image/png" sizes="16x16">
   <style>
     :root {
-      --bg: #06080f;
+      --desktop-start: #29404a;
+      --desktop-mid: #617d7c;
+      --desktop-end: #c1846d;
+      --window: rgba(246, 247, 249, 0.94);
+      --titlebar: rgba(237, 239, 242, 0.92);
+      --panel: #ffffff;
+      --panel-2: #f1f2f4;
+      --border: rgba(45, 52, 61, 0.16);
+      --text: #202124;
+      --muted: #6d7178;
+      --accent: #0a84ff;
+      --accent-2: #0071e3;
+      --success: #28a745;
+      --terminal: #17191d;
+      --terminal-border: #292d33;
+      --terminal-text: #e9ebee;
+      --shadow: 0 32px 90px rgba(15, 24, 31, 0.35), 0 2px 10px rgba(15, 24, 31, 0.18);
+    }
+    :root[data-theme="dark"] {
+      --desktop-start: #17252b;
+      --desktop-mid: #344c4d;
+      --desktop-end: #704b41;
+      --window: rgba(35, 36, 39, 0.96);
+      --titlebar: rgba(45, 46, 50, 0.94);
+      --panel: #2b2c30;
+      --panel-2: #242529;
+      --border: rgba(255, 255, 255, 0.11);
+      --text: #f2f2f4;
+      --muted: #a7a8ae;
+      --terminal: #151619;
+      --terminal-border: #3a3c42;
+      --terminal-text: #f2f3f5;
+      --shadow: 0 36px 100px rgba(0, 0, 0, 0.56), 0 2px 12px rgba(0, 0, 0, 0.35);
+    }
+    :root[data-theme="light"] {
+      --desktop-start: #29404a;
+      --desktop-mid: #78908b;
+      --desktop-end: #d0967d;
+      --window: rgba(248, 249, 251, 0.95);
+      --titlebar: rgba(238, 240, 243, 0.93);
+      --panel: #ffffff;
+      --panel-2: #f2f3f5;
+      --border: rgba(45, 52, 61, 0.16);
+      --text: #202124;
+      --muted: #686c73;
+      --terminal: #1b1d21;
+      --terminal-border: #30343a;
+      --terminal-text: #f5f6f7;
+    }
+    * { box-sizing: border-box; }
+    html { min-height: 100%; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      overflow-x: hidden;
+      color: var(--text);
+      font-family: "Avenir Next", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
+      letter-spacing: 0;
+      background:
+        radial-gradient(circle at 18% 0%, rgba(94, 92, 230, 0.12), transparent 34%),
+        radial-gradient(circle at 82% 0%, rgba(0, 199, 190, 0.1), transparent 32%),
+        var(--window);
+    }
+    button, textarea, input { font: inherit; letter-spacing: 0; }
+    button { cursor: pointer; }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    .row { display: flex; align-items: center; }
+    .desktop { width: 100%; margin: 0; }
+    .app-window {
+      min-height: 100vh;
+      overflow: visible;
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      animation: none;
+    }
+    @keyframes window-in {
+      from { opacity: 0; transform: translateY(10px) scale(0.99); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      min-height: 64px;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      background: rgba(24, 25, 29, 0.88);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(18px) saturate(130%);
+      -webkit-backdrop-filter: blur(18px) saturate(130%);
+    }
+    :root[data-theme="light"] header { background: rgba(245, 246, 248, 0.9); }
+    .header-left, .header-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+    .header-right { justify-content: flex-end; }
+    .header-icon { width: 38px; height: 38px; flex: 0 0 auto; border-radius: 9px; box-shadow: 0 2px 8px rgba(0,0,0,0.28); }
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      padding: 7px 11px;
+      gap: 7px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font-size: 12px;
+      font-family: "SFMono-Regular", Menlo, monospace;
+    }
+    .status-light {
+      width: 9px;
+      height: 9px;
+      flex: 0 0 9px;
+      border-radius: 50%;
+      background: #ff9f0a;
+      box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.14);
+      transition: background 180ms ease, box-shadow 180ms ease;
+    }
+    .status-light.ready { background: #30d158; box-shadow: 0 0 0 3px rgba(48, 209, 88, 0.16); }
+    .status-light.not-ready { background: #ff453a; box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.16); }
+    .status-light.checking { background: #ff9f0a; box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.14); }
+    #ollamaStatusText { color: #ff9f0a; font-weight: 650; }
+    .status-light.ready + #ollamaStatusText { color: #30d158; }
+    .status-light.not-ready + #ollamaStatusText { color: #ff453a; }
+    .status-light.checking + #ollamaStatusText { color: #ff9f0a; }
+    .theme-toggle {
+      width: 40px;
+      height: 38px;
+      padding: 0;
+      display: inline-grid;
+      place-items: center;
+      background: rgba(128,128,128,0.1) !important;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      box-shadow: none;
+      font-size: 16px;
+    }
+    .theme-toggle:hover { background: rgba(128,128,128,0.18) !important; transform: none !important; }
+    .pill {
+      min-width: 0;
+      padding: 8px 12px;
+      color: var(--muted);
+      background: rgba(128,128,128,0.08);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      font: 12px/1.3 "SFMono-Regular", Menlo, monospace;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    main { max-width: none; margin: 0; padding: 18px; }
+    .save-notice {
+      margin-bottom: 12px !important;
+      padding: 8px 11px !important;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted) !important;
+      background: rgba(255, 159, 10, 0.08) !important;
+      border: 1px solid rgba(255, 159, 10, 0.24) !important;
+      border-radius: 7px !important;
+      font-size: 11px !important;
+    }
+    #autonomousGoalBanner {
+      margin-bottom: 12px !important;
+      padding: 12px 14px !important;
+      background: rgba(10, 132, 255, 0.08) !important;
+      border: 1px solid rgba(10, 132, 255, 0.28) !important;
+      border-radius: 8px !important;
+    }
+    #autonomousGoalBanner > div:first-child { margin-bottom: 0 !important; }
+    #activeJobsContainer { border-radius: 6px !important; }
+    .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 14px; align-items: start; }
+    .conversation-column, .utility-column { display: grid; gap: 14px; min-width: 0; }
+    .panel, .terminal-panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+    }
+    .terminal-panel { overflow: hidden; background: var(--terminal); border-color: var(--terminal-border); }
+    .panel-titlebar {
+      height: 36px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      color: #aeb2b8;
+      background: #22252a;
+      border-bottom: 1px solid var(--terminal-border);
+      font: 11px "SFMono-Regular", Menlo, monospace;
+    }
+    .terminal-dots { display: flex; gap: 5px; }
+    .terminal-dots span { width: 6px; height: 6px; border-radius: 50%; background: #555a62; }
+    #log {
+      min-height: 500px;
+      max-height: 64vh;
+      padding: 16px;
+      overflow-y: auto;
+      color: var(--terminal-text);
+      background: var(--terminal);
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
+      font-family: "SFMono-Regular", Menlo, Consolas, monospace;
+      scrollbar-color: #4a4e55 transparent;
+      white-space: pre-wrap;
+    }
+    :root[data-theme="light"] #log { color: var(--terminal-text); }
+    .log-line { margin: 5px 0; font-size: 12px; line-height: 1.65; }
+    .log-user, .label-user { color: #ffcc66; }
+    .log-assistant, .label-assistant { color: #76d991; }
+    .log-command { color: #67c8ff; }
+    .log-plain, :root[data-theme="light"] #log .log-plain { color: var(--terminal-text); }
+    .thinking-block { margin: 6px 0 8px 14px; color: var(--muted); font-family: inherit; font-size: 12px; line-height: 1.65; }
+    .thinking-block summary { cursor: pointer; color: var(--accent-2); font-family: inherit; font-size: inherit; line-height: inherit; font-weight: 700; }
+    .thinking-content { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--border); white-space: pre-wrap; font-family: inherit; font-size: inherit; line-height: inherit; }
+    .log-sep { margin: 12px 0; border-bottom: 1px solid #343840; opacity: 1; }
+    .panel { padding: 13px; }
+    .panel-heading { margin: 0 0 11px; color: var(--text); font-size: 11px; font-weight: 650; text-transform: uppercase; }
+    .toolbar-group { padding-top: 11px; margin-top: 11px; border-top: 1px solid var(--border); }
+    .toolbar-group:first-of-type { padding-top: 0; margin-top: 0; border-top: 0; }
+    .toolbar-label { margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    .stack { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    button {
+      min-height: 32px;
+      padding: 7px 10px;
+      color: var(--text);
+      background: var(--panel-2) !important;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: none;
+      font-size: 11px;
+      font-weight: 600;
+      transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+    }
+    button:hover:not(:disabled) { background: rgba(10,132,255,0.1) !important; border-color: rgba(10,132,255,0.4); box-shadow: none; transform: translateY(-1px); }
+    button:active:not(:disabled) { transform: translateY(0); }
+    #send, #saveSessionConfirm, #loadSessionConfirm, #saveCustomPrompt, #startAutonomousConfirm {
+      color: #fff;
+      background: var(--accent-2) !important;
+      border-color: var(--accent-2);
+    }
+    #stopResponse { display: none; color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    #clearChat { color: #ff453a; background: rgba(255,69,58,0.08) !important; border-color: rgba(255,69,58,0.22); }
+    #showHelp { grid-column: 1 / -1; }
+    #thinkOn.mode-active { color: #fff; background: #28a745 !important; border-color: #28a745; opacity: 1; }
+    #thinkOff.mode-active { color: #422b00; background: #ffcc66 !important; border-color: #e5ad3d; opacity: 1; }
+    .thinking-status {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      min-height: 28px;
+      padding: 5px 9px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 650;
+    }
+    .thinking-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; }
+    .thinking-status.enabled { color: #187a32; background: rgba(40,167,69,0.1); border-color: rgba(40,167,69,0.28); }
+    .thinking-status.enabled::before { background: #28a745; box-shadow: 0 0 0 3px rgba(40,167,69,0.12); }
+    .thinking-status.disabled { color: #8a5a00; background: rgba(255,204,102,0.12); border-color: rgba(229,173,61,0.3); }
+    .thinking-status.disabled::before { background: #e5ad3d; box-shadow: 0 0 0 3px rgba(229,173,61,0.12); }
+    #autonomousStart { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
+    #autonomousStop { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    .autonomous-decision { margin: 10px 0; padding: 10px; background: rgba(10,132,255,0.08); border: 1px solid rgba(10,132,255,0.28); border-radius: 6px; white-space: normal; }
+    .autonomous-decision-title { margin-bottom: 8px; color: var(--terminal-text); font-size: 12px; line-height: 1.5; }
+    .autonomous-decision-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+    .autonomous-decision-actions button { min-height: 26px; padding: 4px 10px; font-size: 10px; }
+    .autonomous-decision .continue-work { color: #fff; background: #28a745 !important; border-color: #28a745; }
+    .autonomous-decision .end-loop { color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    .file-upload-btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 5px; }
+    .file-upload-btn input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+    .info-icon { width: 15px; height: 15px; margin-left: 2px; color: var(--muted); background: rgba(128,128,128,0.14); font-size: 9px; }
+    .file-attachment-state { display: none; align-items: center; gap: 7px; margin-top: 8px; }
+    .file-attachment-state.visible { display: flex; }
+    .file-name { min-width: 0; flex: 1; color: var(--success); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .file-attachment-state.disabled .file-name { color: var(--muted); }
+    #toggleAttachedFile { min-height: 26px; padding: 4px 8px; flex: 0 0 auto; font-size: 9px; }
+    .composer-panel { padding: 13px; }
+    label { margin-bottom: 7px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    textarea, input[type="text"] {
+      width: 100%;
+      padding: 10px 11px;
+      color: var(--text);
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-shadow: inset 0 1px 2px rgba(0,0,0,0.04);
+      outline: none;
+    }
+    textarea:focus, input[type="text"]:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(10,132,255,0.14); }
+    textarea { min-height: 112px; resize: vertical; font: 12px/1.55 "SFMono-Regular", Menlo, monospace; }
+    .composer-actions { margin-top: 9px; display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .composer-actions .row { gap: 7px; }
+    .composer-hint { max-width: 260px; color: var(--muted); font-size: 10px; text-align: right; }
+    .spinner { width: 16px; height: 16px; display: none; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+    .spinner.visible { display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .stats-panel { padding: 0; overflow: hidden; }
+    .stats-header { min-height: 40px; margin: 0 !important; padding: 0 12px; }
+    .stats-header h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; }
+    #statsToggle { font-size: 12px !important; }
+    .stats-grid { display: grid; padding: 0 12px 12px; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .stats-grid.collapsed { display: none; }
+    .stat-card {
+      min-width: 0;
+      padding: 10px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      box-shadow: none;
+      backdrop-filter: none;
+    }
+    .stat-card::before { display: none; }
+    .stat-top { display: block; }
+    .stat-label { font-size: 9px; text-transform: none; }
+    .stat-tag { display: none; }
+    .stat-value { margin: 4px 0 1px; color: var(--text); font-size: 23px; font-weight: 650; }
+    .stat-sub { font-size: 9px; line-height: 1.4; }
+    .stat-span-2 { grid-column: span 2; }
+    #modalOverlay { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(15,18,22,0.42); backdrop-filter: blur(12px); }
+    #modalOverlay.show { display: flex; }
+    .modal-card {
+      width: min(92vw, 680px);
+      max-height: min(86vh, 760px);
+      display: flex;
+      flex-direction: column;
+      padding: 0;
+      overflow: hidden;
+      color: var(--text);
+      background: var(--window);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 12px;
+      box-shadow: 0 28px 80px rgba(0,0,0,0.42);
+    }
+    .modal-header {
+      min-height: 48px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0;
+      padding: 0 10px 0 14px;
+      flex: 0 0 auto;
+      background: var(--titlebar);
+      border-bottom: 1px solid var(--border);
+    }
+    .modal-title { min-width: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
+    .modal-close {
+      width: 30px;
+      height: 30px;
+      min-height: 30px;
+      flex: 0 0 30px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      color: var(--muted);
+      background: transparent !important;
+      border-color: transparent;
+      border-radius: 6px;
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 1;
+    }
+    .modal-close:hover { color: var(--text); background: rgba(128,128,128,0.14) !important; border-color: transparent !important; transform: none !important; }
+    .modal-body { min-height: 0; padding: 14px; overflow: auto; font-size: 12px; line-height: 1.5; }
+    .modal-pre {
+      max-width: 100%;
+      max-height: 62vh;
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      color: var(--terminal-text);
+      background: var(--terminal);
+      border: 1px solid var(--terminal-border);
+      border-radius: 7px;
+      font: 11px/1.55 "SFMono-Regular", Menlo, Consolas, monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    @media (max-width: 980px) {
+      .workspace-grid { grid-template-columns: 1fr; }
+      .utility-column { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+      #log { min-height: 420px; }
+    }
+    @media (max-width: 700px) {
+      header { position: static; min-height: 58px; align-items: center; padding: 10px 12px; }
+      .header-left { flex-wrap: nowrap; gap: 8px; }
+      .header-icon { width: 34px; height: 34px; }
+      header #model, header #prompt, header #session, header #version { display: none; }
+      main { padding: 10px; }
+      .utility-column { grid-template-columns: 1fr; }
+      #log { min-height: 360px; max-height: 52vh; }
+      .composer-actions { align-items: flex-start; flex-direction: column; }
+      .composer-hint { max-width: none; text-align: left; }
+      #modalOverlay { align-items: flex-end; padding: 10px; }
+      .modal-card { width: 100%; max-height: calc(100dvh - 20px); border-radius: 10px; }
+      .modal-body { padding: 10px; }
+      .modal-pre { padding: 10px; font-size: 10px; }
+      .stat-span-2 { grid-column: span 1; }
+    }
+    #footer {
+      width: 100%;
+      margin: 24px auto 12px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.4;
+      text-align: center;
+      letter-spacing: 0;
+    }
+    #footer a { color: var(--accent); }
+    @media (prefers-reduced-motion: reduce) {
+      .app-window { animation: none; }
+      * { scroll-behavior: auto !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="desktop">
+    <div class="app-window">
+      <header>
+        <div class="header-left">
+          <img class="header-icon" src="img/webui.png" alt="OWRAP" />
+          <div class="status-indicator">
+            <div class="status-light checking" id="ollamaStatus" title="Checking Ollama status"></div>
+            <span id="ollamaStatusText" role="status" aria-live="polite">checking...</span>
+          </div>
+          <div class="pill" id="model">model: ...</div>
+          <div class="pill" id="prompt">sys-prompt: loaded</div>
+          <div class="pill" id="session">session: new</div>
+        </div>
+        <div class="header-right">
+          <button class="theme-toggle" id="themeToggle" type="button" title="Toggle theme" aria-label="Toggle theme">◐</button>
+          <div class="pill" id="version">version: ...</div>
+        </div>
+      </header>
+      <template id="legacyUiFragment">
       --panel: #0d111a;
       --panel-2: #111827;
       --border: #1f2937;
-      --text: #e6edf3;
-      --muted: #9ca3af;
-      --accent: #7c3aed;
-      --accent-2: #22d3ee;
-      --success: #22c55e;
-    }
+      </div>
     :root[data-theme="light"] {
       --bg: #f8fafc;
       --panel: #ffffff;
@@ -100,7 +541,6 @@
     .label-user { color: #fbbf24; font-weight: 700; }
     .label-assistant { color: #22c55e; font-weight: 700; }
     .log-sep { border-bottom: 2px dashed #22d3ee; opacity: 0.85; margin: 10px 0 12px; }
-    #footer { text-align: center; color: var(--muted); font-size: 12px; margin: 24px 0 12px; letter-spacing: 0.3px; }
     @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
     @media (max-width: 640px) { .stat-span-2 { grid-column: span 1; } }
   </style>
@@ -122,6 +562,7 @@
       <div class="pill" id="version">version: ...</div>
     </div>
   </header>
+  </template>
   <main>
     <!-- <h2>owrapUI</h2> -->
 
@@ -141,105 +582,126 @@
       </div>
     </div>
 
-    <div style="margin-bottom: 12px; padding: 10px 14px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 10px; font-size: 13px; color: var(--muted);">
-      ℹ️ <strong>Note:</strong> Sessions are not saved by default. Use the <strong>/save</strong> button to save your current session.
+    <div class="save-notice">
+      <strong>Automatically restored</strong><span>Use /save to create a named session snapshot.</span>
     </div>
 
-    <div id="log"></div>
+    <div class="workspace-grid">
+      <section class="conversation-column">
+        <div class="terminal-panel">
+          <div class="panel-titlebar">
+            <span>Conversation</span>
+            <div class="terminal-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+          </div>
+          <div id="log"></div>
+        </div>
 
-    <div class="panel" style="margin-top:16px;">
-      <div class="stack" style="justify-content: center;">
-        <button id="showPrompt" type="button">Show sys-prompt</button>
-        <button id="editPrompt" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">Edit sys-prompt</button>
-        <button class="file-upload-btn" type="button">
-          📎 Upload File
-          <span class="info-icon" id="fileUploadInfo" title="Click for file upload info">ℹ️</span>
-          <input type="file" id="fileUpload" accept="*/*" />
-        </button>
-      </div>
-      <div class="stack" style="justify-content: center; margin-top: 10px;">
-        <button id="showHelp" type="button" style="background: linear-gradient(135deg, #22c55e, #16a34a);">/help</button>
-        <button id="showMyPrompts" type="button" style="background: linear-gradient(135deg, #f59e0b, #d97706);">/myprompts</button>
-        <button id="autoOn" type="button">/auto-on</button>
-        <button id="autoOff" type="button">/auto-off</button>
-        <button id="saveSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/save</button>
-        <button id="loadSession" type="button" style="background: linear-gradient(135deg, #3b82f6, #2563eb);">/load</button>
-        <button id="listSessions" type="button" style="background: linear-gradient(135deg, #8b5cf6, #7c3aed);">/sessions</button>
-        <button id="showLast" type="button">/last</button>
-      </div>
-      <div class="stack" style="justify-content: center; margin-top: 10px;">
-        <button id="autonomousStart" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🤖 /autostart</button>
-        <button id="autonomousStop" type="button" style="background: linear-gradient(135deg, #64748b, #475569); display: none;">⏹️ /autostop</button>
-      </div>
-      <div style="text-align: center; margin-top: 4px;">
-        <span id="fileName" class="file-name"></span>
-      </div>
-    </div>
+        <div class="panel composer-panel">
+          <label for="msg">Message <span style="font-weight:400;">(⌘/Ctrl+Enter to send)</span></label>
+          <textarea id="msg" placeholder="Ask a question or request a command..."></textarea>
+          <div class="composer-actions">
+            <div class="row">
+              <button id="send">Send</button>
+              <button id="stopResponse" type="button">Stop</button>
+              <button id="clearChat" type="button">Clear</button>
+              <div id="sendSpinner" class="spinner" aria-hidden="true"></div>
+              <span id="quickResponseTime" style="font-size:10px; color:var(--accent); font-weight:600; display:none;">0.000s</span>
+            </div>
+            <span class="composer-hint">The assistant can run allowlisted commands.</span>
+          </div>
+        </div>
+      </section>
 
-    <div class="panel" style="margin-top:16px;">
-      <label>Console input (⌘/Ctrl+Enter to send)</label>
-      <textarea id="msg" placeholder="Type a message or command for the assistant."></textarea>
-      <div class="row" style="margin-top:8px; justify-content: space-between;">
-        <div class="row" style="gap:8px;">
-          <button id="send">Send</button>
-          <button id="clearChat" type="button" style="background: linear-gradient(135deg, #ef4444, #f97316);">Clear chat</button>
-          <div id="sendSpinner" class="spinner" aria-hidden="true"></div>
-          <span id="quickResponseTime" style="font-size:12px; color:var(--accent-2); font-weight:600; display:none;">⏱️ 0.000s</span>
+      <aside class="utility-column">
+        <div class="panel toolbar-panel">
+          <h2 class="panel-heading">Tools</h2>
+          <div class="toolbar-group">
+            <div class="toolbar-label">Context</div>
+            <div class="stack">
+              <button id="showPrompt" type="button">View system prompt</button>
+              <button id="editPrompt" type="button">Edit system prompt</button>
+              <button class="file-upload-btn" type="button">
+                Attach file
+                <span class="info-icon" id="fileUploadInfo" title="File upload details">i</span>
+                <input type="file" id="fileUpload" accept="*/*" aria-label="Attach file" />
+              </button>
+              <button id="showMyPrompts" type="button">My prompts</button>
+            </div>
+            <div class="file-attachment-state" id="fileAttachmentState">
+              <span id="fileName" class="file-name"></span>
+              <button id="toggleAttachedFile" type="button">Disable file</button>
+            </div>
+          </div>
+          <div class="toolbar-group">
+            <div class="toolbar-label">Session</div>
+            <div class="stack">
+              <button id="saveSession" type="button">/save</button>
+              <button id="loadSession" type="button">/load</button>
+              <button id="listSessions" type="button">/sessions</button>
+              <button id="showLast" type="button">/last</button>
+            </div>
+          </div>
+          <div class="toolbar-group">
+            <div class="toolbar-label">Assistant</div>
+            <div class="stack">
+              <button id="showHelp" type="button">/help</button>
+              <button id="autoOn" type="button">Analysis on</button>
+              <button id="autoOff" type="button">Analysis off</button>
+              <button id="thinkOn" type="button">Thinking on</button>
+              <button id="thinkOff" type="button">Thinking off</button>
+              <div id="thinkingState" class="thinking-status disabled" role="status" aria-live="polite">Thinking disabled</div>
+              <button id="autonomousStart" type="button">Start autonomous</button>
+              <button id="autonomousStop" type="button" style="display: none;">Stop autonomous</button>
+            </div>
+          </div>
         </div>
-        <span style="font-size:12px; color:var(--muted);">Assistant may choose to run allowed commands.</span>
-      </div>
-    </div>
 
-    <div class="panel" style="margin-top:16px;">
-      <div class="row stats-header" id="statsHeader" style="justify-content: space-between; align-items: center; margin-bottom: 10px;">
-        <div class="row" style="gap:8px; align-items: center;">
-          <h3 style="margin:0; color: var(--text);">session stats</h3>
-          <span class="pill" style="background: rgba(34,211,238,0.12); color: #a5f3fc;">auto-updates</span>
-        </div>
-        <span id="statsToggle" style="color: var(--muted); font-size: 18px;">▼</span>
-      </div>
-      <div class="stats-grid collapsed" id="statsGrid">
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">User messages</div>
-            <span class="stat-tag">you</span>
+        <div class="panel stats-panel">
+          <div class="row stats-header" id="statsHeader" style="justify-content: space-between; align-items: center;">
+            <div class="row" style="gap:8px; align-items: center;">
+              <h3 style="margin:0; color: var(--text);">Session stats</h3>
+            </div>
+            <span id="statsToggle" style="color: var(--muted);">▼</span>
           </div>
-          <div class="stat-value" id="statUserMessages">0</div>
-          <div class="stat-sub">chars <span id="statUserChars">0</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Assistant messages</div>
-            <span class="stat-tag">assistant</span>
+          <div class="stats-grid collapsed" id="statsGrid">
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">User messages</div><span class="stat-tag">you</span></div>
+              <div class="stat-value" id="statUserMessages">0</div>
+              <div class="stat-sub">chars <span id="statUserChars">0</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">Assistant</div><span class="stat-tag">assistant</span></div>
+              <div class="stat-value" id="statAssistantMessages">0</div>
+              <div class="stat-sub">chars <span id="statAssistantChars">0</span></div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">Commands</div><span class="stat-tag">commands</span></div>
+              <div class="stat-value" id="statCommands">0</div>
+              <div class="stat-sub">run this session</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-top"><div class="stat-label">Response</div><span class="stat-tag">time</span></div>
+              <div class="stat-value" id="statResponseTime">-</div>
+              <div class="stat-sub">last request</div>
+            </div>
+            <div class="stat-card stat-span-2">
+              <div class="stat-top"><div class="stat-label">Context</div><span class="stat-tag">estimate</span></div>
+              <div class="stat-value" id="statContextTokens">~0</div>
+              <div class="stat-sub">estimated tokens · <span id="statContextChars">0</span> chars</div>
+            </div>
           </div>
-          <div class="stat-value" id="statAssistantMessages">0</div>
-          <div class="stat-sub">chars <span id="statAssistantChars">0</span></div>
         </div>
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Commands run</div>
-            <span class="stat-tag">commands</span>
-          </div>
-          <div class="stat-value" id="statCommands">0</div>
-          <div class="stat-sub">Recent command appears in the log.</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-top">
-            <div class="stat-label">Last response time</div>
-            <span class="stat-tag">time</span>
-          </div>
-          <div class="stat-value" id="statResponseTime">-</div>
-          <div class="stat-sub">Time taken for last response</div>
-        </div>
-      </div>
+      </aside>
     </div>
   </main>
-  <div id="footer">© 2049 michalswi</div>
+    </div>
+  </div>
+  <footer id="footer">Open Source &bull; Available on <a href="https://github.com/michalswi/owrap" target="_blank" rel="noopener noreferrer">GitHub</a> &copy;2049 michalswi</footer>
   <div id="modalOverlay">
-    <div class="modal-card">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-header">
         <div class="modal-title" id="modalTitle"></div>
-        <button class="modal-close" id="modalClose" type="button">OK</button>
+        <button class="modal-close" id="modalClose" type="button" title="Close" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body" id="modalBody"></div>
     </div>
@@ -248,6 +710,7 @@
     const logEl = document.getElementById('log');
     const msgEl = document.getElementById('msg');
     const sendBtn = document.getElementById('send');
+    const stopResponseBtn = document.getElementById('stopResponse');
     const promptBtn = document.getElementById('showPrompt');
     const editPromptBtn = document.getElementById('editPrompt');
     const helpBtn = document.getElementById('showHelp');
@@ -259,6 +722,9 @@
     const listBtn = document.getElementById('listSessions');
     const autoOnBtn = document.getElementById('autoOn');
     const autoOffBtn = document.getElementById('autoOff');
+    const thinkOnBtn = document.getElementById('thinkOn');
+    const thinkOffBtn = document.getElementById('thinkOff');
+    const thinkingStateEl = document.getElementById('thinkingState');
     const autonomousStartBtn = document.getElementById('autonomousStart');
     const autonomousStopBtn = document.getElementById('autonomousStop');
     const modelEl = document.getElementById('model');
@@ -278,7 +744,9 @@
     const ollamaStatusText = document.getElementById('ollamaStatusText');
     const themeToggle = document.getElementById('themeToggle');
     const fileUpload = document.getElementById('fileUpload');
+    const fileAttachmentState = document.getElementById('fileAttachmentState');
     const fileNameDisplay = document.getElementById('fileName');
+    const toggleAttachedFileBtn = document.getElementById('toggleAttachedFile');
     const fileUploadInfo = document.getElementById('fileUploadInfo');
     const autonomousGoalBanner = document.getElementById('autonomousGoalBanner');
     const autonomousGoalText = document.getElementById('autonomousGoalText');
@@ -290,9 +758,11 @@
       commands: document.getElementById('statCommands'),
       userChars: document.getElementById('statUserChars'),
       assistantChars: document.getElementById('statAssistantChars'),
-      responseTime: document.getElementById('statResponseTime')
+      responseTime: document.getElementById('statResponseTime'),
+      contextTokens: document.getElementById('statContextTokens'),
+      contextChars: document.getElementById('statContextChars')
     };
-    const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '' };
+    const emptyStats = { UserMessages: 0, AssistantMessages: 0, CommandsRun: 0, TotalUserChars: 0, TotalAssistantChars: 0, LastCommand: '', ContextChars: 0, EstimatedContextTokens: 0, LastResponseMillis: 0 };
     const STORAGE_KEY = 'owrap_ui_state_v1';
     const THEME_KEY = 'owrap_theme';
     let sessionId = '';
@@ -300,12 +770,15 @@
     let restoringState = false;
     let lastResponseTime = null;
     let pendingFile = null;
+    let pendingFileEnabled = false;
     let lastUserMessage = ''; // Track last user message for UI feedback
     let isAutonomousActive = false; // Track if autonomous mode is currently running
     let isRequestInProgress = false; // Track if a sendText request is in progress
+    let activeRequestController = null;
     let stopRequested = false; // Track if user clicked /autostop
     let showStopMessageAfterResponse = false; // Track if we need to show stop message after response displays
     let restoredPromptName = ''; // Store the restored prompt name for display after response
+    let thinkingEnabled = false;
 
     statsHeader.addEventListener('click', () => {
       statsGrid.classList.toggle('collapsed');
@@ -330,6 +803,9 @@
       if (e.key === 'Escape') closeModal();
     });
     clearBtn.addEventListener('click', clearChat);
+    stopResponseBtn.addEventListener('click', () => {
+      if (activeRequestController) activeRequestController.abort();
+    });
     saveBtn.addEventListener('click', showSaveDialog);
     loadBtn.addEventListener('click', showLoadDialog);
     listBtn.addEventListener('click', () => sendText('/sessions'));
@@ -337,8 +813,10 @@
     myPromptsBtn.addEventListener('click', showMyPrompts);
     autoOnBtn.addEventListener('click', () => sendText('/auto-on'));
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
+    thinkOnBtn.addEventListener('click', () => sendText('/think-on'));
+    thinkOffBtn.addEventListener('click', () => sendText('/think-off'));
     autonomousStartBtn.addEventListener('click', showAutonomousStartDialog);
-    autonomousStopBtn.addEventListener('click', stopAutonomousMode);
+    autonomousStopBtn.addEventListener('click', () => stopAutonomousMode('manual'));
     fileUploadInfo.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -398,14 +876,15 @@
 
     function showFileUploadInfo() {
       const infoHtml = `
-        <div class="modal-subtitle">One-time file analysis workflow</div>
+        <div class="modal-subtitle">Reusable file context</div>
         <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
           <div style="font-weight: 700; margin-bottom: 8px; color: var(--accent-2);">How it works:</div>
           <ol style="margin: 0; padding-left: 20px; line-height: 1.8;">
-            <li>Click "📎 Upload File" and select a file</li>
+            <li>Click "Attach file" and select a file</li>
             <li>Write a prompt (e.g., "summarize", "find bugs", "explain")</li>
             <li>Click Send - file content is sent to Ollama with your prompt</li>
-            <li>File is cleared after sending (one-time analysis)</li>
+            <li>The file remains active for later messages until you disable it</li>
+            <li>Use Enable file to reuse the loaded file without selecting it again</li>
           </ol>
         </div>
         <div style="margin: 12px 0; padding: 12px; background: var(--panel); border: 1px solid var(--border); border-radius: 8px;">
@@ -539,51 +1018,99 @@
       }
     }
 
-    function loadState() {
-      let parsed = null;
-      try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) parsed = JSON.parse(raw);
-      } catch (_) {
-        parsed = null;
+    function renderRestoredMessages(messages = []) {
+      logEl.innerHTML = '';
+      for (const message of messages) {
+        if (message.role === 'system') continue;
+        if (message.role === 'user') {
+          appendSeparator();
+          appendLine(`You: ${message.content}`, 'user');
+        } else if (message.role === 'assistant') {
+          appendThinking(message.thinking);
+          appendLine(`Assistant: ${message.content}`, 'assistant');
+        }
       }
-      if (!parsed) return false;
-      restoringState = true;
-      if (parsed.log) logEl.innerHTML = parsed.log;
-      if (parsed.sessionId) {
-        sessionId = parsed.sessionId;
-        sessionEl.textContent = `session: ${sessionId}`;
-      }
-      if (parsed.stats) {
-        renderStats(parsed.stats, true);
-      }
-      if (parsed.model) modelEl.textContent = parsed.model;
-      if (parsed.prompt) promptEl.textContent = parsed.prompt;
-      if (parsed.version) versionEl.textContent = parsed.version;
-      restoringState = false;
-      return true;
     }
 
-    function clearChat() {
+    async function loadState() {
+      try {
+        const response = await fetch('/api/state');
+        if (!response.ok) throw new Error(`state request failed: ${response.status}`);
+        const state = await response.json();
+        restoringState = true;
+        sessionId = state.sessionId || '';
+        sessionEl.textContent = `session: ${sessionId}`;
+        renderRestoredMessages(state.messages || []);
+        renderStats(state.stats || emptyStats, true);
+        if (state.model) modelEl.textContent = `model: ${state.model}`;
+        if (state.prompt) promptEl.textContent = `sys-prompt: ${state.prompt}`;
+        setThinkingState(Boolean(state.thinking));
+        if (state.autonomousMode) {
+          isAutonomousActive = true;
+          autonomousGoalText.textContent = state.autonomousGoal || 'Active autonomous goal';
+          autonomousGoalBanner.style.display = 'block';
+          autonomousStartBtn.style.display = 'none';
+          autonomousStopBtn.style.display = 'inline-flex';
+          disableAllButtons();
+          if (state.autonomousDecision) {
+            appendSeparator();
+            appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
+            appendAutonomousDecision();
+          }
+        }
+        restoringState = false;
+        saveState();
+        return true;
+      } catch (_) {
+        let parsed = null;
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (raw) parsed = JSON.parse(raw);
+        } catch (_) {
+          parsed = null;
+        }
+        if (!parsed) return false;
+        restoringState = true;
+        if (parsed.log) logEl.innerHTML = parsed.log;
+        if (parsed.sessionId) {
+          sessionId = parsed.sessionId;
+          sessionEl.textContent = `session: ${sessionId}`;
+        }
+        if (parsed.stats) renderStats(parsed.stats, true);
+        restoringState = false;
+        return true;
+      }
+    }
+
+    async function clearChat() {
+      let resetState;
+      try {
+        const response = await fetch('/api/state', { method: 'DELETE' });
+        if (!response.ok) throw new Error(`reset failed: ${response.status}`);
+        resetState = await response.json();
+        sessionId = resetState.sessionId || '';
+      } catch (error) {
+        appendLine(`Could not clear shared session: ${error.message}`, 'error');
+        return;
+      }
       logEl.innerHTML = '';
-      sessionId = '';
-      sessionEl.textContent = 'session: new';
-      renderStats(emptyStats, true);
+      sessionEl.textContent = `session: ${sessionId}`;
+      renderStats(resetState.stats || emptyStats, true);
       lastResponseTime = null;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
       pendingFile = null;
+      pendingFileEnabled = false;
       fileUpload.value = '';
-      fileNameDisplay.textContent = '';
-      fileNameDisplay.style.color = 'var(--muted)';
+      updateAttachedFileUI();
       msgEl.placeholder = 'Type a message or command for the assistant.';
       saveState();
     }
 
     function showSaveDialog() {
       const bodyHtml = `
-        <div class="modal-subtitle">Save your current session to /tmp/sessions</div>
+        <div class="modal-subtitle">Save your current session to ~/.owrap/sessions</div>
         <label style="margin-top:12px; display:block;">Session name (optional):</label>
         <input type="text" id="saveSessionInput" placeholder="Leave empty for auto-generated name (owrap_YYYYMMDD_HHMM.json)" style="margin-top:6px;">
         <div style="margin-top:12px; display:flex; gap:10px;">
@@ -729,7 +1256,7 @@
         }
       } catch (e) {
         ollamaStatusLight.className = 'status-light not-ready';
-        ollamaStatusText.textContent = 'error';
+        ollamaStatusText.textContent = 'modelNotReady';
         ollamaStatusLight.title = 'Failed to check Ollama status';
       }
     }
@@ -765,17 +1292,20 @@
       statsEls.commands.textContent = s.CommandsRun;
       statsEls.userChars.textContent = s.TotalUserChars;
       statsEls.assistantChars.textContent = s.TotalAssistantChars;
+      statsEls.contextTokens.textContent = `~${s.EstimatedContextTokens.toLocaleString()}`;
+      statsEls.contextChars.textContent = s.ContextChars.toLocaleString();
+      statsEls.responseTime.textContent = s.LastResponseMillis > 0 ? `${(s.LastResponseMillis / 1000).toFixed(3)}s` : '-';
       if (!skipSave) saveState();
     }
 
     async function send() {
       let text = msgEl.value.trim();
-      if (!text && !pendingFile) return;
+      if (!text && !(pendingFile && pendingFileEnabled)) return;
       
       let displayText = text;
       let apiText = text;
       
-      if (pendingFile) {
+      if (pendingFile && pendingFileEnabled) {
         const fileInfo = `[File: ${pendingFile.name}, Size: ${(pendingFile.size / 1024).toFixed(1)} KB]`;
         const userPrompt = text || 'Please analyze this file.';
         
@@ -785,18 +1315,12 @@
         // For API: send prompt + file info + full content
         apiText = `${userPrompt}\n\n${fileInfo}\n\n${pendingFile.content}`;
         
-        // Clear pending file
-        pendingFile = null;
-        fileUpload.value = '';
-        fileNameDisplay.textContent = '';
-        fileNameDisplay.style.color = 'var(--muted)';
-        msgEl.placeholder = 'Type a message or command for the assistant.';
       }
       
       await sendText(apiText, true, displayText);
     }
 
-    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false) {
+    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false) {
       if (!text) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
@@ -808,20 +1332,20 @@
       
       // Track last user message for UI feedback
       lastUserMessage = text;
+      const requestController = new AbortController();
+      activeRequestController = requestController;
       
       const startTime = performance.now();
       try {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message: text })
+          body: JSON.stringify({ sessionId, message: text, resumeAutonomous }),
+          signal: requestController.signal
         });
         const endTime = performance.now();
         const responseTime = ((endTime - startTime) / 1000).toFixed(3);
         lastResponseTime = responseTime;
-        if (statsEls.responseTime) {
-          statsEls.responseTime.textContent = `${responseTime}s`;
-        }
         if (quickResponseTime) {
           quickResponseTime.textContent = `⏱️ ${responseTime}s`;
           quickResponseTime.style.display = 'inline';
@@ -833,6 +1357,7 @@
           console.log('Response data:', data); // Debug log
           sessionId = data.sessionId;
           sessionEl.textContent = `session: ${sessionId}`;
+          if (typeof data.thinkingEnabled === 'boolean') setThinkingState(data.thinkingEnabled);
           
           // Handle session_loaded action - clear log and display all messages
           if (data.action === 'session_loaded') {
@@ -847,6 +1372,7 @@
                 appendSeparator();
                 appendLine(`You: ${msg.content}`, 'user');
               } else if (msg.role === 'assistant') {
+                appendThinking(msg.thinking);
                 appendLine(`Assistant: ${msg.content}`, 'assistant');
               }
             }
@@ -894,9 +1420,10 @@
           }
           
           // Display update_findings action
+          appendThinking(data.thinking);
           if (data.action === 'update_findings' && data.assistantText) {
             appendLine(data.assistantText, 'assistant');
-          } else if (data.assistantText && data.action !== 'run_command') {
+          } else if (data.assistantText && data.action !== 'run_command' && data.action !== 'error') {
             appendLine(`Assistant: ${data.assistantText}`, 'assistant');
           }
           
@@ -935,7 +1462,9 @@
           }
           
           // Auto-continue autonomous loop
-          if (data.autonomousContinue && !stopRequested) {
+          if (isAutonomousActive && data.autonomousStop) {
+            setTimeout(() => stopAutonomousMode('stalled'), 0);
+          } else if (data.autonomousContinue && !stopRequested) {
             appendSeparator();
             if (data.action === 'error') {
               // Error message already includes retry count from backend
@@ -955,6 +1484,10 @@
                 sendText('next step', false, null, true); // skipMyPrompts=true
               }, 1500);
             }
+          } else if (isAutonomousActive && data.autonomousDecision) {
+            appendSeparator();
+            appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
+            appendAutonomousDecision();
           } else if (isAutonomousActive && !data.autonomousMode && data.action === 'answer') {
             // Agent provided final answer and stopped autonomous mode
             appendSeparator();
@@ -971,8 +1504,13 @@
           }
         }
       } catch (e) {
-        appendLine('Network error: ' + e, 'error');
+        if (e.name === 'AbortError') {
+          appendLine('Response stopped.', 'plain');
+        } else {
+          appendLine('Network error: ' + e, 'error');
+        }
       } finally {
+        if (activeRequestController === requestController) activeRequestController = null;
         isRequestInProgress = false;
         
         // Show stop message after response if stop was requested during this request
@@ -994,6 +1532,7 @@
 
     function setSending(active) {
       sendBtn.disabled = active;
+      stopResponseBtn.style.display = active ? 'inline-flex' : 'none';
       sendSpinner.classList.toggle('visible', active);
       sendSpinner.setAttribute('aria-hidden', (!active).toString());
     }
@@ -1024,6 +1563,49 @@
       const skipAttr = skipMyPrompts ? ' data-skip-myprompts="true"' : '';
       logEl.insertAdjacentHTML('beforeend', `<div class="log-line ${cls}"${skipAttr}>${labelHtml}${renderedBody}</div>`);
       logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function appendThinking(thinking) {
+      if (!thinking) return;
+      logEl.insertAdjacentHTML('beforeend', `<details class="thinking-block"><summary>Model reasoning</summary><div class="thinking-content">${ansiToHtml(thinking)}</div></details>`);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function appendAutonomousDecision() {
+      logEl.querySelector('.autonomous-decision')?.remove();
+      logEl.insertAdjacentHTML('beforeend', `
+        <div class="autonomous-decision">
+          <div class="autonomous-decision-title">Review the candidate answer, then choose what the agent should do next.</div>
+          <div class="autonomous-decision-actions">
+            <button class="continue-work" type="button">Continue working</button>
+            <button class="end-loop" type="button">End loop</button>
+          </div>
+        </div>`);
+
+      const decision = logEl.querySelector('.autonomous-decision');
+      decision.querySelector('.continue-work').addEventListener('click', () => {
+        decision.remove();
+        appendLine('Continuing autonomous work...', 'plain');
+        sendText('The candidate answer is not satisfactory yet. Continue working on the goal, address remaining gaps, and provide an improved answer.', false, null, true, true);
+      });
+      decision.querySelector('.end-loop').addEventListener('click', async () => {
+        decision.remove();
+        await stopAutonomousMode('accepted');
+      });
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function setThinkingState(enabled) {
+      thinkingEnabled = enabled;
+      thinkingStateEl.textContent = `Thinking ${enabled ? 'enabled' : 'disabled'}`;
+      thinkingStateEl.classList.toggle('enabled', enabled);
+      thinkingStateEl.classList.toggle('disabled', !enabled);
+      thinkOnBtn.classList.toggle('mode-active', enabled);
+      thinkOffBtn.classList.toggle('mode-active', !enabled);
+      thinkOnBtn.setAttribute('aria-pressed', enabled.toString());
+      thinkOffBtn.setAttribute('aria-pressed', (!enabled).toString());
+      thinkOnBtn.disabled = enabled;
+      thinkOffBtn.disabled = !enabled;
     }
 
     function appendSeparator() {
@@ -1313,7 +1895,7 @@
       }
     }
 
-    async function stopAutonomousMode() {
+    async function stopAutonomousMode(reason = 'manual') {
       try {
         // Set flag to prevent auto-continue from triggering
         stopRequested = true;
@@ -1358,7 +1940,12 @@
         // Only show stop message immediately if no request was in progress
         if (!showStopMessageAfterResponse) {
           appendSeparator();
-          appendLine('⏹️ Autonomous mode STOPPED', 'assistant');
+          const stopMessage = reason === 'accepted'
+            ? 'Answer accepted. Autonomous loop ended.'
+            : reason === 'stalled'
+              ? 'Autonomous mode stopped because the agent could not continue.'
+              : '⏹️ Autonomous mode STOPPED';
+          appendLine(stopMessage, 'assistant');
           appendLine(`System prompt restored to: ${data.prompt}`, 'assistant');
           appendSeparator();
         }
@@ -1386,11 +1973,12 @@
       autoOnBtn.disabled = true;
       autoOffBtn.disabled = true;
       document.querySelector('.file-upload-btn').disabled = true;
+      toggleAttachedFileBtn.disabled = true;
       fileUpload.disabled = true;
       
       // Apply disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
-                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn'), toggleAttachedFileBtn];
       buttons.forEach(btn => {
         btn.style.opacity = '0.5';
         btn.style.cursor = 'not-allowed';
@@ -1411,11 +1999,12 @@
       autoOnBtn.disabled = false;
       autoOffBtn.disabled = false;
       document.querySelector('.file-upload-btn').disabled = false;
+      toggleAttachedFileBtn.disabled = false;
       fileUpload.disabled = false;
       
       // Remove disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
-                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn')];
+                      saveBtn, loadBtn, listBtn, autoOnBtn, autoOffBtn, document.querySelector('.file-upload-btn'), toggleAttachedFileBtn];
       buttons.forEach(btn => {
         btn.style.opacity = '';
         btn.style.cursor = '';
@@ -1431,12 +2020,32 @@
         .replace(/'/g, '&#39;');
     }
 
+    function updateAttachedFileUI() {
+      const hasFile = pendingFile !== null;
+      fileAttachmentState.classList.toggle('visible', hasFile);
+      fileAttachmentState.classList.toggle('disabled', hasFile && !pendingFileEnabled);
+      if (!hasFile) {
+        fileNameDisplay.textContent = '';
+        fileNameDisplay.removeAttribute('title');
+        return;
+      }
+      const state = pendingFileEnabled ? 'Active' : 'Disabled';
+      fileNameDisplay.textContent = `${pendingFile.name} (${(pendingFile.size / 1024).toFixed(1)} KB) - ${state}`;
+      fileNameDisplay.title = fileNameDisplay.textContent;
+      toggleAttachedFileBtn.textContent = pendingFileEnabled ? 'Disable file' : 'Enable file';
+      toggleAttachedFileBtn.setAttribute('aria-pressed', String(pendingFileEnabled));
+    }
+
+    toggleAttachedFileBtn.addEventListener('click', () => {
+      if (!pendingFile) return;
+      pendingFileEnabled = !pendingFileEnabled;
+      updateAttachedFileUI();
+      msgEl.focus();
+    });
+
     fileUpload.addEventListener('change', async (e) => {
       const file = e.target.files[0];
       if (!file) return;
-      
-      fileNameDisplay.textContent = `📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB) - Ready`;
-      fileNameDisplay.style.color = 'var(--success)';
       
       try {
         const content = await readFileContent(file);
@@ -1446,14 +2055,16 @@
           type: file.type,
           content: content
         };
+        pendingFileEnabled = true;
+        updateAttachedFileUI();
         msgEl.placeholder = `What would you like me to do with ${file.name}?`;
         msgEl.focus();
       } catch (err) {
         appendLine(`Error reading file: ${err.message}`, 'error');
-        fileNameDisplay.textContent = '';
-        fileNameDisplay.style.color = 'var(--muted)';
         e.target.value = '';
         pendingFile = null;
+        pendingFileEnabled = false;
+        updateAttachedFileUI();
       }
     });
 
@@ -1497,16 +2108,17 @@
       }
     });
 
-    initTheme();
-    const restored = loadState();
-    fetchPrompt();
-    checkOllamaStatus();
-    // Check Ollama status every 10 seconds
-    setInterval(checkOllamaStatus, 10000);
-    if (!restored) {
-      renderStats(emptyStats, true);
+    async function initializeApp() {
+      initTheme();
+      const restored = await loadState();
+      await fetchPrompt();
+      checkOllamaStatus();
+      setInterval(checkOllamaStatus, 10000);
+      if (!restored) renderStats(emptyStats, true);
+      msgEl.focus();
     }
-    msgEl.focus();
+
+    initializeApp();
   </script>
 </body>
 </html>

@@ -45,6 +45,11 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
+	defer func() {
+		if err := webStore.persist(); err != nil {
+			log.Printf("warning: could not persist Web UI state: %v", err)
+		}
+	}()
 
 	// Save original prompt
 	sess.OriginalPrompt = systemPrompt
@@ -53,15 +58,23 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	// Activate autonomous mode
 	sess.AutonomousMode = true
 	sess.AutonomousGoal = req.Goal
+	sess.AwaitingDecision = false
+	sess.AutonomousStart = len(sess.Messages)
+	sess.RetryCount = 0
+	sess.CommandCount = 0
+	sess.PartialFindings = ""
+	sess.LastCommands = nil
 
 	// Store file attachment if provided and write to temp directory
 	var filePath string
 	if req.File != nil {
 		sess.AttachedFile = req.File
 
-		// Create temp directory for this session's files
-		tempDir := filepath.Join("/tmp", "owrap_autonomous_files", sess.ID)
-		if err := os.MkdirAll(tempDir, 0755); err != nil {
+		// Create application directory for this session's files
+		tempDir, err := owrapAutonomousSessionDir(sess.ID)
+		if err != nil {
+			log.Printf("[AUTONOMOUS] Warning: failed to resolve storage dir: %v", err)
+		} else if err := os.MkdirAll(tempDir, 0755); err != nil {
 			log.Printf("[AUTONOMOUS] Warning: failed to create temp dir: %v", err)
 		} else {
 			// Write file to temp directory
@@ -80,17 +93,6 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 		log.Printf("[AUTONOMOUS] Mode activated for session %s: goal=%s", sess.ID, req.Goal)
 	}
 
-	// Load autonomous system prompt
-	promptPath := "prompts/autonomous_agent.txt"
-	data, err := os.ReadFile(promptPath)
-	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to load autonomous prompt: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	// Replace placeholders
-	autonomousPrompt := string(data)
-
 	// Build goal description (don't include file content in system prompt anymore)
 	goalDescription := req.Goal
 	if req.File != nil && filePath != "" {
@@ -98,12 +100,16 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 		goalDescription += "\nYou can use standard command-line tools (cat, grep, jq, awk, etc.) to analyze this file."
 	}
 
-	autonomousPrompt = strings.ReplaceAll(autonomousPrompt, "{GOAL_DESCRIPTION}", goalDescription)
-	autonomousPrompt = strings.ReplaceAll(autonomousPrompt, "{ITERATION_HISTORY}", "No previous attempts yet.")
+	// Add the autonomous protocol without discarding the selected prompt.
+	autonomousPrompt, err := composeAutonomousPrompt(sess.OriginalPrompt, goalDescription, "No previous attempts yet.")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to load autonomous prompt: %v", err), http.StatusInternalServerError)
+		return
+	}
 
 	// Update system prompt
 	systemPrompt = autonomousPrompt
-	systemPromptName = "autonomous_agent.txt"
+	systemPromptName = sess.OriginalPromptName + " + autonomous"
 
 	response := map[string]interface{}{
 		"sessionId": sess.ID,
@@ -134,6 +140,11 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
+	defer func() {
+		if err := webStore.persist(); err != nil {
+			log.Printf("warning: could not persist Web UI state: %v", err)
+		}
+	}()
 
 	if !sess.AutonomousMode {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -156,8 +167,10 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 
 	// Clean up temp file if exists
 	if sess.AttachedFilePath != "" {
-		tempDir := filepath.Join("/tmp", "owrap_autonomous_files", sess.ID)
-		if err := os.RemoveAll(tempDir); err != nil {
+		tempDir, err := owrapAutonomousSessionDir(sess.ID)
+		if err != nil {
+			log.Printf("[AUTONOMOUS] Warning: failed to resolve storage dir: %v", err)
+		} else if err := os.RemoveAll(tempDir); err != nil {
 			log.Printf("[AUTONOMOUS] Warning: failed to clean up temp dir: %v", err)
 		} else {
 			log.Printf("[AUTONOMOUS] Cleaned up temp directory: %s", tempDir)
@@ -167,6 +180,8 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 	// Deactivate autonomous mode
 	sess.AutonomousMode = false
 	sess.AutonomousGoal = ""
+	sess.AwaitingDecision = false
+	sess.AutonomousStart = 0
 	sess.AttachedFile = nil
 	sess.AttachedFilePath = ""
 
@@ -186,6 +201,9 @@ func buildIterationHistory(sess *webSession) string {
 
 	// Get last few messages to show what happened
 	start := len(sess.Messages) - 6
+	if sess.AutonomousMode && start < sess.AutonomousStart {
+		start = sess.AutonomousStart
+	}
 	if start < 0 {
 		start = 0
 	}
@@ -212,19 +230,19 @@ func getRecentCommands(sess *webSession) []string {
 	return sess.LastCommands
 }
 
-// updateAutonomousPrompt updates the autonomous mode prompt with current goal and history
-func updateAutonomousPrompt(goal, history string) string {
+// composeAutonomousPrompt preserves the selected prompt and appends the autonomous protocol.
+func composeAutonomousPrompt(basePrompt, goal, history string) (string, error) {
 	promptPath := "prompts/autonomous_agent.txt"
 	data, err := os.ReadFile(promptPath)
 	if err != nil {
-		return defaultSystemPrompt
+		return "", err
 	}
 
-	prompt := string(data)
-	prompt = strings.ReplaceAll(prompt, "{GOAL_DESCRIPTION}", goal)
-	prompt = strings.ReplaceAll(prompt, "{ITERATION_HISTORY}", history)
+	protocol := string(data)
+	protocol = strings.ReplaceAll(protocol, "{GOAL_DESCRIPTION}", goal)
+	protocol = strings.ReplaceAll(protocol, "{ITERATION_HISTORY}", history)
 
-	return prompt
+	return strings.TrimSpace(basePrompt) + "\n\n---\n\n" + protocol, nil
 }
 
 // handleAutonomousCommand processes commands in autonomous mode with special logic
@@ -241,7 +259,9 @@ func handleAutonomousCommand(sess *webSession, tool ToolResponse, messageContent
 		{Role: "user", Content: summaryPrompt},
 	}
 
+	summaryStarted := time.Now()
 	quickSummary, err := callOllamaWithLog("quick-summary:"+sess.ID, summaryMessages, false)
+	sess.Stats.recordResponseDuration(time.Since(summaryStarted))
 	if err != nil {
 		// If summary generation fails, provide a basic one
 		if strings.Contains(out, "Error") || strings.Contains(out, "error") {
@@ -257,7 +277,7 @@ func handleAutonomousCommand(sess *webSession, tool ToolResponse, messageContent
 
 	// Add summary to conversation so model sees it
 	summaryNote := "📝 " + quickSummary
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: summaryNote})
+	sess.appendMessage("assistant", summaryNote)
 
 	// Every 3 commands, force detailed goal review. Otherwise, simple continue.
 	var analysisPrompt string
@@ -313,7 +333,7 @@ What's your NEXT command (different from above)?
 {"action":"run_command","command":"<next_command>"}`, cmdHistory)
 	}
 
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: analysisPrompt})
+	sess.appendContextMessage("user", analysisPrompt)
 
 	return webChatResponse{
 		SessionID:          sess.ID,
@@ -342,15 +362,12 @@ func handleAutonomousJSONError(sess *webSession, raw string, clean string, err e
 
 	// After 3 retries, stop autonomous mode
 	if sess.RetryCount >= 3 {
-		sess.AutonomousMode = false
 		sess.RetryCount = 0
-		systemPrompt = sess.OriginalPrompt
-		systemPromptName = sess.OriginalPromptName
-		log.Printf("[AUTONOMOUS] Max retries reached, stopping autonomous mode")
+		log.Printf("[AUTONOMOUS] Max retries reached, requesting normal stop cleanup")
 
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
-		errorText := "❌ Autonomous mode stopped: Agent failed to produce valid JSON after 3 retries. Please provide clearer instructions or try a different approach."
-		sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: errorText})
+		sess.appendMessage("assistant", raw)
+		errorText := "❌ Agent failed to follow the autonomous response protocol after 3 retries. Stopping autonomous mode."
+		sess.appendMessage("assistant", errorText)
 
 		return webChatResponse{
 			SessionID:          sess.ID,
@@ -361,8 +378,9 @@ func handleAutonomousJSONError(sess *webSession, raw string, clean string, err e
 			Model:              modelName,
 			Timestamp:          time.Now().UTC(),
 			Stats:              sess.Stats,
-			AutonomousMode:     false,
+			AutonomousMode:     true,
 			AutonomousContinue: false,
+			AutonomousStop:     true,
 		}
 	}
 
@@ -385,22 +403,30 @@ PROBLEMS WITH YOUR RESPONSE:
 - You added markdown code blocks (backticks) - FORBIDDEN!
 - Your response contains text BEFORE or AFTER the JSON object
 
-ABSOLUTE RULE: Your ENTIRE response must be ONLY this pattern:
+ABSOLUTE RULE: Your ENTIRE response must be ONE valid JSON object using a supported action.
+
+If the goal can be answered now:
+{"action":"answer","text":"your complete answer"}
+
+If a command is needed:
 {"action":"run_command","command":"your_command_here"}
+
+Other supported actions: run_command_bg, check_job, get_job, list_jobs, update_findings.
 
 WRONG examples (what you did):
 ❌ Command output:\n{"action":...}
 ❌ `+"```json"+`\n{"action":...}\n`+"```"+`
 ❌ Here is the command: {"action":...}
 
-CORRECT example (what you MUST do):
-✅ {"action":"run_command","command":"nslookup michalswi.azurewebsites.net"}
+CORRECT examples:
+✅ {"action":"answer","text":"A complete answer to the goal"}
+✅ {"action":"run_command","command":"wc -l input.txt"}
 
 Your response must be EXACTLY that - nothing before {, nothing after }.
 Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePreview)
 
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: raw})
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "user", Content: errorMsg})
+	sess.appendMessage("assistant", raw)
+	sess.appendContextMessage("user", errorMsg)
 
 	return webChatResponse{
 		SessionID:          sess.ID,
@@ -427,12 +453,14 @@ func handleUpdateFindings(sess *webSession, tool ToolResponse) webChatResponse {
 		}
 		log.Printf("[AUTONOMOUS] Updated findings for session %s: %s", sess.ID, tool.Text)
 	}
+	content := "✅ Saved: " + tool.Text
+	sess.appendMessage("assistant", content)
 
 	// Continue autonomous mode
 	return webChatResponse{
 		SessionID:          sess.ID,
 		Action:             "update_findings",
-		AssistantText:      "✅ Saved: " + tool.Text,
+		AssistantText:      content,
 		Messages:           sess.Messages,
 		Model:              modelName,
 		Timestamp:          time.Now().UTC(),
@@ -443,21 +471,10 @@ func handleUpdateFindings(sess *webSession, tool ToolResponse) webChatResponse {
 	}
 }
 
-// handleAutonomousAnswer processes the answer action and stops autonomous mode
+// handleAutonomousAnswer pauses autonomous mode so the user can accept the answer or continue.
 func handleAutonomousAnswer(sess *webSession, tool ToolResponse) webChatResponse {
-	sess.Stats.recordAssistant(tool.Text)
-	sess.Messages = append(sess.Messages, ChatMessage{Role: "assistant", Content: tool.Text})
-
-	// In autonomous mode, "answer" action means goal complete - stop autonomous mode
-	wasAutonomous := sess.AutonomousMode
-	if sess.AutonomousMode {
-		sess.AutonomousMode = false
-		systemPrompt = sess.OriginalPrompt
-		systemPromptName = sess.OriginalPromptName
-		sess.PartialFindings = "" // Clear findings when done
-		sess.LastCommands = nil   // Clear command history
-		log.Printf("[AUTONOMOUS] Goal completed with final summary, stopping autonomous mode")
-	}
+	sess.appendMessage("assistant", tool.Text)
+	sess.AwaitingDecision = sess.AutonomousMode
 
 	response := webChatResponse{
 		SessionID:          sess.ID,
@@ -467,13 +484,13 @@ func handleAutonomousAnswer(sess *webSession, tool ToolResponse) webChatResponse
 		Model:              modelName,
 		Timestamp:          time.Now().UTC(),
 		Stats:              sess.Stats,
-		AutonomousMode:     false, // Explicitly set to false
-		AutonomousContinue: false, // Stop the loop
+		AutonomousMode:     sess.AutonomousMode,
+		AutonomousContinue: false,
+		AutonomousDecision: sess.AutonomousMode,
 	}
 
-	// If it was autonomous, log auto-stop
-	if wasAutonomous {
-		log.Printf("[AUTONOMOUS] Triggering auto-stop for session %s", sess.ID)
+	if sess.AutonomousMode {
+		log.Printf("[AUTONOMOUS] Candidate answer ready for user decision in session %s", sess.ID)
 	}
 
 	return response

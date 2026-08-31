@@ -83,7 +83,7 @@ func handleSlashCommand(input string, stats *Stats) bool {
 			return true
 		}
 		if len(sessions) == 0 {
-			fmt.Println(info("No saved sessions found in /tmp/sessions"))
+			fmt.Println(info("No saved sessions found in ~/.owrap/sessions"))
 		} else {
 			fmt.Println(accent(fmt.Sprintf("Saved sessions (%d):", len(sessions))))
 			for _, name := range sessions {
@@ -98,6 +98,14 @@ func handleSlashCommand(input string, stats *Stats) bool {
 	case "/auto-off":
 		autoAnalyze = false
 		fmt.Println(info("Auto-analysis disabled."))
+		return true
+	case "/think-on":
+		thinkingEnabled = true
+		fmt.Println(success("Thinking enabled for subsequent requests."))
+		return true
+	case "/think-off":
+		thinkingEnabled = false
+		fmt.Println(info("Thinking disabled."))
 		return true
 	case "/editsysprompt":
 		handleEditSystemPrompt()
@@ -118,19 +126,21 @@ func printHelp() {
 	fmt.Println("  /dir           Show current working directory")
 	fmt.Println("  /m             Show Ollama LLM model in use")
 	fmt.Println("  /up            Show app uptime")
-	fmt.Println("  /s, /stats     Show session stats (counts, chars, last command)")
+	fmt.Println("  /s, /stats     Show counts, chars, context estimate, timing, and last command")
 	fmt.Println("  /last          Show last prompt + model answer")
 	fmt.Println("  /myprompts     Show all your prompts from current session")
 	fmt.Println("  /sysprompt     Show current system prompt")
 	fmt.Println("  /editsysprompt Edit system prompt (select from files or write custom)")
-	fmt.Println("  /save [NAME]   Save current session to /tmp/sessions (auto-named if NAME omitted)")
+	fmt.Println("  /save [NAME]   Save current session to ~/.owrap/sessions (auto-named if NAME omitted)")
 	fmt.Println("  /load NAME     Load a saved session by name")
-	fmt.Println("  /sessions      List all saved sessions in /tmp/sessions")
+	fmt.Println("  /sessions      List all saved sessions in ~/.owrap/sessions")
 	fmt.Println("  /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)")
 	fmt.Println("  /cache         List cached (not sent) blocks")
 	fmt.Println("  /use N         Send cached block #N (1-based) with optional question")
 	fmt.Println("  /auto-on       LLM auto-analyzes command output after execution")
 	fmt.Println("  /auto-off      [default] No LLM auto-analysis after command execution")
+	fmt.Println("  /think-on      Ask supported models to return reasoning")
+	fmt.Println("  /think-off     [default] Disable model reasoning")
 	fmt.Println("  /execfile P    Execute each non-empty line in file P (no analysis)")
 	fmt.Println(accent("Model-run allowed commands:"))
 	fmt.Printf("  [%s]\n", strings.Join(allowedCommandsList(), ", "))
@@ -176,6 +186,7 @@ func loadSession(name string, stats *Stats) error {
 
 	// Restore stats
 	*stats = session.Stats
+	stats.updateContext(systemPrompt, session.Messages)
 
 	// Restore session messages for saving
 	sessionMessages = session.Messages

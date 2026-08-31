@@ -1,0 +1,466 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestWebSessionAppendMessageUpdatesStatsAndContext(t *testing.T) {
+	previousPrompt := systemPrompt
+	systemPrompt = "system"
+	t.Cleanup(func() { systemPrompt = previousPrompt })
+
+	sess := &webSession{}
+	sess.appendMessage("user", "hello")
+	sess.appendMessage("assistant", "world!")
+
+	if sess.Stats.UserMessages != 1 || sess.Stats.AssistantMessages != 1 {
+		t.Fatalf("unexpected message counts: %+v", sess.Stats)
+	}
+	if sess.Stats.TotalUserChars != 5 || sess.Stats.TotalAssistantChars != 6 {
+		t.Fatalf("unexpected character counts: %+v", sess.Stats)
+	}
+	wantContextChars := len("systemhelloworld!")
+	if sess.Stats.ContextChars != wantContextChars {
+		t.Fatalf("ContextChars = %d, want %d", sess.Stats.ContextChars, wantContextChars)
+	}
+	if sess.Stats.EstimatedContextTokens != (wantContextChars+3)/4 {
+		t.Fatalf("EstimatedContextTokens = %d", sess.Stats.EstimatedContextTokens)
+	}
+}
+
+func TestCallOllamaThinkingProtocol(t *testing.T) {
+	tests := []struct {
+		name         string
+		think        bool
+		thinkingText string
+	}{
+		{name: "disabled by default"},
+		{name: "enabled with reasoning", think: true, thinkingText: "reasoning trace"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var received ChatRequest
+			ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+					t.Fatal(err)
+				}
+				_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: "answer", Thinking: test.thinkingText}})
+			}))
+			defer ollama.Close()
+
+			previousURL := ollamaURL
+			ollamaURL = ollama.URL
+			t.Cleanup(func() { ollamaURL = previousURL })
+
+			message, err := callOllamaMessageContext(context.Background(), []ChatMessage{{Role: "user", Content: "question"}}, false, test.think)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if received.Think != test.think {
+				t.Fatalf("request think = %v, want %v", received.Think, test.think)
+			}
+			if message.Thinking != test.thinkingText || message.Content != "answer" {
+				t.Fatalf("unexpected response message: %+v", message)
+			}
+		})
+	}
+}
+
+func TestWebThinkingToggleAndResponsePersistence(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var received ChatRequest
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatal(err)
+		}
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{
+			Role: "assistant", Content: `{"action":"answer","text":"final answer"}`, Thinking: "reasoning trace",
+		}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	toggleResponse := httptest.NewRecorder()
+	handleWebChat(toggleResponse, httptest.NewRequest(http.MethodPost, "/api/chat", bytes.NewBufferString(`{"message":"/think-on"}`)))
+	if toggleResponse.Code != http.StatusOK {
+		t.Fatalf("toggle status = %d", toggleResponse.Code)
+	}
+	var toggled webChatResponse
+	if err := json.Unmarshal(toggleResponse.Body.Bytes(), &toggled); err != nil {
+		t.Fatal(err)
+	}
+	if !toggled.ThinkingEnabled {
+		t.Fatal("thinking was not enabled")
+	}
+
+	chatResponse := httptest.NewRecorder()
+	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"question"}`, toggled.SessionID))
+	handleWebChat(chatResponse, httptest.NewRequest(http.MethodPost, "/api/chat", body))
+	var payload webChatResponse
+	if err := json.Unmarshal(chatResponse.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if !received.Think || payload.Thinking != "reasoning trace" || !payload.ThinkingEnabled {
+		t.Fatalf("thinking response not preserved: request=%+v response=%+v", received, payload)
+	}
+	if len(payload.Messages) != 2 || payload.Messages[1].Thinking != "reasoning trace" {
+		t.Fatalf("reasoning missing from messages: %+v", payload.Messages)
+	}
+
+	restartedStore := newWebSessionStore()
+	if err := restartedStore.load(); err != nil {
+		t.Fatal(err)
+	}
+	restored, ok := restartedStore.active()
+	if !ok || restored.ThinkingEnabled || restored.Messages[1].Thinking != "reasoning trace" {
+		t.Fatalf("thinking state not persisted: %+v", restored)
+	}
+}
+
+func TestTerminalThinkingCommands(t *testing.T) {
+	previous := thinkingEnabled
+	thinkingEnabled = false
+	t.Cleanup(func() { thinkingEnabled = previous })
+
+	if !handleSlashCommand("/think-on", &Stats{}) || !thinkingEnabled {
+		t.Fatal("/think-on did not enable thinking")
+	}
+	if !handleSlashCommand("/think-off", &Stats{}) || thinkingEnabled {
+		t.Fatal("/think-off did not disable thinking")
+	}
+}
+
+func TestHandleWebChatCountsRawReplyAndCommandOutput(t *testing.T) {
+	tests := []struct {
+		name             string
+		ollamaContent    string
+		wantCommands     int
+		wantAssistantMin int
+	}{
+		{name: "raw reply", ollamaContent: "plain reply", wantAssistantMin: 1},
+		{name: "command output", ollamaContent: `{"action":"run_command","command":"echo stats-test"}`, wantCommands: 1, wantAssistantMin: 1},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: test.ollamaContent}})
+			}))
+			defer ollama.Close()
+
+			previousURL, previousStore := ollamaURL, webStore
+			ollamaURL, webStore = ollama.URL, newWebSessionStore()
+			t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+			body := bytes.NewBufferString(`{"message":"test request"}`)
+			req := httptest.NewRequest(http.MethodPost, "/api/chat", body)
+			response := httptest.NewRecorder()
+			handleWebChat(response, req)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+			}
+
+			var payload webChatResponse
+			if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Stats.UserMessages != 1 || payload.Stats.AssistantMessages < test.wantAssistantMin {
+				t.Fatalf("unexpected message stats: %+v", payload.Stats)
+			}
+			if payload.Stats.CommandsRun != test.wantCommands {
+				t.Fatalf("CommandsRun = %d, want %d", payload.Stats.CommandsRun, test.wantCommands)
+			}
+			if payload.Stats.ContextChars == 0 || payload.Stats.EstimatedContextTokens == 0 {
+				t.Fatalf("context estimate not populated: %+v", payload.Stats)
+			}
+		})
+	}
+}
+
+func TestAutonomousFailureMessagesAreCounted(t *testing.T) {
+	previousPrompt := systemPrompt
+	systemPrompt = "autonomous"
+	t.Cleanup(func() { systemPrompt = previousPrompt })
+
+	sess := &webSession{AutonomousMode: true, RetryCount: 2}
+	response := handleAutonomousJSONError(sess, "invalid", "invalid", nil)
+	if response.Stats.AssistantMessages != 2 {
+		t.Fatalf("AssistantMessages = %d, want 2", response.Stats.AssistantMessages)
+	}
+	if !response.AutonomousStop || !sess.AutonomousMode || response.AutonomousContinue {
+		t.Fatalf("retry exhaustion did not request normal stop cleanup: session=%+v response=%+v", sess, response)
+	}
+	if len(sess.Messages) != 2 {
+		t.Fatalf("messages = %d, want 2", len(sess.Messages))
+	}
+}
+
+func TestAutonomousInternalPromptOnlyUpdatesContext(t *testing.T) {
+	previousPrompt := systemPrompt
+	systemPrompt = "autonomous"
+	t.Cleanup(func() { systemPrompt = previousPrompt })
+
+	sess := &webSession{}
+	sess.appendContextMessage("user", "continue internally")
+	if sess.Stats.UserMessages != 0 || sess.Stats.TotalUserChars != 0 {
+		t.Fatalf("internal prompt changed user stats: %+v", sess.Stats)
+	}
+	if sess.Stats.ContextChars != len("autonomouscontinue internally") {
+		t.Fatalf("internal prompt missing from context: %+v", sess.Stats)
+	}
+}
+
+func TestComposeAutonomousPromptPreservesSelectedPrompt(t *testing.T) {
+	prompt, err := composeAutonomousPrompt(
+		"You are a concise philosophy assistant.",
+		"Who is God? Short answer.",
+		"No previous attempts yet.",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"You are a concise philosophy assistant.",
+		"Who is God? Short answer.",
+		`"action": "answer"`,
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("composed prompt missing %q", required)
+		}
+	}
+}
+
+func TestAutonomousRunExcludesEarlierMessages(t *testing.T) {
+	sess := &webSession{
+		Messages: []ChatMessage{
+			{Role: "user", Content: "old autonomous goal"},
+			{Role: "assistant", Content: "old autonomous result"},
+			{Role: "user", Content: "new autonomous goal"},
+		},
+		AutonomousMode:  true,
+		AutonomousStart: 2,
+	}
+
+	messages := sess.modelMessages()
+	if len(messages) != 1 || messages[0].Content != "new autonomous goal" {
+		t.Fatalf("autonomous model context contains earlier messages: %+v", messages)
+	}
+	history := buildIterationHistory(sess)
+	if strings.Contains(history, "old autonomous") || !strings.Contains(history, "new autonomous goal") {
+		t.Fatalf("autonomous iteration history crossed run boundary: %q", history)
+	}
+}
+
+func TestAutonomousAnswerWaitsForUserDecision(t *testing.T) {
+	previousPrompt, previousPromptName := systemPrompt, systemPromptName
+	systemPrompt, systemPromptName = "autonomous prompt", "autonomous_agent.txt"
+	t.Cleanup(func() { systemPrompt, systemPromptName = previousPrompt, previousPromptName })
+
+	sess := &webSession{
+		AutonomousMode:     true,
+		AutonomousGoal:     "finish the report",
+		OriginalPrompt:     "original prompt",
+		OriginalPromptName: "default",
+	}
+	response := handleAutonomousAnswer(sess, ToolResponse{Action: "answer", Text: "candidate answer"})
+
+	if !sess.AutonomousMode || !sess.AwaitingDecision || !response.AutonomousMode || !response.AutonomousDecision {
+		t.Fatalf("autonomous mode did not pause for a decision: session=%+v response=%+v", sess, response)
+	}
+	if response.AutonomousContinue {
+		t.Fatal("candidate answer should not auto-continue")
+	}
+	if systemPrompt != "autonomous prompt" || systemPromptName != "autonomous_agent.txt" {
+		t.Fatal("autonomous prompt was restored before the user ended the loop")
+	}
+}
+
+func TestAutonomousMissingJobContinuesLoop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{
+			Role: "assistant", Content: `{"action":"check_job","jobId":"missing-job"}`,
+		}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"next step"}`, sess.ID))
+	response := httptest.NewRecorder()
+	handleWebChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", body))
+
+	var payload webChatResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || payload.Action != "error" || !payload.AutonomousMode || !payload.AutonomousContinue {
+		t.Fatalf("missing job stalled autonomous loop: status=%d payload=%+v", response.Code, payload)
+	}
+	if len(sess.Messages) < 2 || sess.Messages[len(sess.Messages)-1].Content != "Job not found: missing-job" {
+		t.Fatalf("missing-job feedback not retained in context: %+v", sess.Messages)
+	}
+}
+
+func TestAutonomousMixedProtocolFailuresCountTowardStop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	responses := []string{
+		"not json",
+		`{"action":"check_file","url":"https://example.com"}`,
+		"still not json",
+	}
+	responseIndex := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		content := responses[responseIndex]
+		responseIndex++
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	for attempt := 1; attempt <= 3; attempt++ {
+		body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"retry"}`, sess.ID))
+		response := httptest.NewRecorder()
+		handleWebChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", body))
+
+		var payload webChatResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if attempt < 3 {
+			if payload.AutonomousStop || sess.RetryCount != attempt {
+				t.Fatalf("attempt %d retry state = %d, payload=%+v", attempt, sess.RetryCount, payload)
+			}
+		} else if !payload.AutonomousStop {
+			t.Fatalf("third protocol failure did not request stop: %+v", payload)
+		}
+	}
+}
+
+func TestTerminalMessageAccounting(t *testing.T) {
+	previousMessages := sessionMessages
+	previousPrompt := systemPrompt
+	sessionMessages = nil
+	systemPrompt = "system"
+	t.Cleanup(func() {
+		sessionMessages = previousMessages
+		systemPrompt = previousPrompt
+	})
+
+	messages := []ChatMessage{{Role: "system", Content: systemPrompt}}
+	stats := &Stats{}
+	appendTerminalMessage(&messages, stats, "user", "question")
+	appendTerminalMessage(&messages, stats, "assistant", "raw fallback")
+	if stats.UserMessages != 1 || stats.AssistantMessages != 1 {
+		t.Fatalf("unexpected terminal stats: %+v", stats)
+	}
+	if len(sessionMessages) != 2 {
+		t.Fatalf("sessionMessages = %d, want 2", len(sessionMessages))
+	}
+}
+
+func TestStatsTimingAndSessionPersistence(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	stats := Stats{UserMessages: 1, ContextChars: 100, EstimatedContextTokens: 25}
+	stats.recordResponseDuration(1250 * time.Millisecond)
+	session := Session{Model: "test", Messages: []ChatMessage{{Role: "user", Content: "hello"}}, Stats: stats}
+
+	path, err := saveSessionToFile(session, "stats-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasSuffix(path, "stats-test.json") {
+		t.Fatalf("unexpected path: %s", path)
+	}
+	loaded, err := loadSessionFromFile("stats-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Stats.LastResponseMillis != 1250 || loaded.Stats.EstimatedContextTokens != 25 {
+		t.Fatalf("stats not preserved: %+v", loaded.Stats)
+	}
+}
+
+func TestWebStatePersistsAcrossClientsAndRestart(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	previousStore := webStore
+	t.Cleanup(func() { webStore = previousStore })
+
+	webStore = newWebSessionStore()
+	original := webStore.ensure("")
+	original.appendMessage("user", "shared question")
+	original.appendMessage("assistant", "shared answer")
+	original.AutonomousMode = true
+	original.AutonomousGoal = "shared goal"
+	original.AwaitingDecision = true
+	autonomousDir, err := owrapAutonomousSessionDir(original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(autonomousDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	original.AttachedFilePath = filepath.Join(autonomousDir, "attachment.txt")
+	if err := os.WriteFile(original.AttachedFilePath, []byte("stale"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := webStore.persist(); err != nil {
+		t.Fatal(err)
+	}
+
+	restartedStore := newWebSessionStore()
+	if err := restartedStore.load(); err != nil {
+		t.Fatal(err)
+	}
+	webStore = restartedStore
+
+	response := httptest.NewRecorder()
+	handleWebState(response, httptest.NewRequest(http.MethodGet, "/api/state", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var restored webStateResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &restored); err != nil {
+		t.Fatal(err)
+	}
+	if restored.SessionID != original.ID || len(restored.Messages) != 2 || restored.AutonomousMode || restored.AutonomousGoal != "" || restored.AutonomousDecision {
+		t.Fatalf("state not restored: %+v", restored)
+	}
+	if _, err := os.Stat(autonomousDir); !os.IsNotExist(err) {
+		t.Fatalf("stale autonomous directory still exists: %v", err)
+	}
+
+	resetResponse := httptest.NewRecorder()
+	handleWebState(resetResponse, httptest.NewRequest(http.MethodDelete, "/api/state", nil))
+	if resetResponse.Code != http.StatusOK {
+		t.Fatalf("DELETE status = %d, body = %s", resetResponse.Code, resetResponse.Body.String())
+	}
+	current := webStore.ensure(original.ID)
+	if current.ID == original.ID || len(current.Messages) != 0 {
+		t.Fatalf("shared reset did not replace active session: %+v", current)
+	}
+}
