@@ -280,8 +280,14 @@
     .thinking-status.enabled::before { background: #28a745; box-shadow: 0 0 0 3px rgba(40,167,69,0.12); }
     .thinking-status.disabled { color: #8a5a00; background: rgba(255,204,102,0.12); border-color: rgba(229,173,61,0.3); }
     .thinking-status.disabled::before { background: #e5ad3d; box-shadow: 0 0 0 3px rgba(229,173,61,0.12); }
-    #autonomousStart { grid-column: 1 / -1; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
-    #autonomousStop { grid-column: 1 / -1; color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    #autonomousStart { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
+    #autonomousStop { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    .autonomous-decision { margin: 10px 0; padding: 10px; background: rgba(10,132,255,0.08); border: 1px solid rgba(10,132,255,0.28); border-radius: 6px; white-space: normal; }
+    .autonomous-decision-title { margin-bottom: 8px; color: var(--terminal-text); font-size: 12px; line-height: 1.5; }
+    .autonomous-decision-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+    .autonomous-decision-actions button { min-height: 26px; padding: 4px 10px; font-size: 10px; }
+    .autonomous-decision .continue-work { color: #fff; background: #28a745 !important; border-color: #28a745; }
+    .autonomous-decision .end-loop { color: #fff; background: #ff453a !important; border-color: #ff453a; }
     .file-upload-btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 5px; }
     .file-upload-btn input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     .info-icon { width: 15px; height: 15px; margin-left: 2px; color: var(--muted); background: rgba(128,128,128,0.14); font-size: 9px; }
@@ -800,7 +806,7 @@
     thinkOnBtn.addEventListener('click', () => sendText('/think-on'));
     thinkOffBtn.addEventListener('click', () => sendText('/think-off'));
     autonomousStartBtn.addEventListener('click', showAutonomousStartDialog);
-    autonomousStopBtn.addEventListener('click', stopAutonomousMode);
+    autonomousStopBtn.addEventListener('click', () => stopAutonomousMode('manual'));
     fileUploadInfo.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -1029,6 +1035,19 @@
         if (state.model) modelEl.textContent = `model: ${state.model}`;
         if (state.prompt) promptEl.textContent = `sys-prompt: ${state.prompt}`;
         setThinkingState(Boolean(state.thinking));
+        if (state.autonomousMode) {
+          isAutonomousActive = true;
+          autonomousGoalText.textContent = state.autonomousGoal || 'Active autonomous goal';
+          autonomousGoalBanner.style.display = 'block';
+          autonomousStartBtn.style.display = 'none';
+          autonomousStopBtn.style.display = 'inline-flex';
+          disableAllButtons();
+          if (state.autonomousDecision) {
+            appendSeparator();
+            appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
+            appendAutonomousDecision();
+          }
+        }
         restoringState = false;
         saveState();
         return true;
@@ -1291,7 +1310,7 @@
       await sendText(apiText, true, displayText);
     }
 
-    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false) {
+    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false) {
       if (!text) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
@@ -1311,7 +1330,7 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message: text }),
+          body: JSON.stringify({ sessionId, message: text, resumeAutonomous }),
           signal: requestController.signal
         });
         const endTime = performance.now();
@@ -1394,7 +1413,7 @@
           appendThinking(data.thinking);
           if (data.action === 'update_findings' && data.assistantText) {
             appendLine(data.assistantText, 'assistant');
-          } else if (data.assistantText && data.action !== 'run_command') {
+          } else if (data.assistantText && data.action !== 'run_command' && data.action !== 'error') {
             appendLine(`Assistant: ${data.assistantText}`, 'assistant');
           }
           
@@ -1433,7 +1452,9 @@
           }
           
           // Auto-continue autonomous loop
-          if (data.autonomousContinue && !stopRequested) {
+          if (isAutonomousActive && data.autonomousStop) {
+            setTimeout(() => stopAutonomousMode('stalled'), 0);
+          } else if (data.autonomousContinue && !stopRequested) {
             appendSeparator();
             if (data.action === 'error') {
               // Error message already includes retry count from backend
@@ -1453,6 +1474,10 @@
                 sendText('next step', false, null, true); // skipMyPrompts=true
               }, 1500);
             }
+          } else if (isAutonomousActive && data.autonomousDecision) {
+            appendSeparator();
+            appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
+            appendAutonomousDecision();
           } else if (isAutonomousActive && !data.autonomousMode && data.action === 'answer') {
             // Agent provided final answer and stopped autonomous mode
             appendSeparator();
@@ -1533,6 +1558,30 @@
     function appendThinking(thinking) {
       if (!thinking) return;
       logEl.insertAdjacentHTML('beforeend', `<details class="thinking-block"><summary>Model reasoning</summary><div class="thinking-content">${ansiToHtml(thinking)}</div></details>`);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function appendAutonomousDecision() {
+      logEl.querySelector('.autonomous-decision')?.remove();
+      logEl.insertAdjacentHTML('beforeend', `
+        <div class="autonomous-decision">
+          <div class="autonomous-decision-title">Review the candidate answer, then choose what the agent should do next.</div>
+          <div class="autonomous-decision-actions">
+            <button class="continue-work" type="button">Continue working</button>
+            <button class="end-loop" type="button">End loop</button>
+          </div>
+        </div>`);
+
+      const decision = logEl.querySelector('.autonomous-decision');
+      decision.querySelector('.continue-work').addEventListener('click', () => {
+        decision.remove();
+        appendLine('Continuing autonomous work...', 'plain');
+        sendText('The candidate answer is not satisfactory yet. Continue working on the goal, address remaining gaps, and provide an improved answer.', false, null, true, true);
+      });
+      decision.querySelector('.end-loop').addEventListener('click', async () => {
+        decision.remove();
+        await stopAutonomousMode('accepted');
+      });
       logEl.scrollTop = logEl.scrollHeight;
     }
 
@@ -1836,7 +1885,7 @@
       }
     }
 
-    async function stopAutonomousMode() {
+    async function stopAutonomousMode(reason = 'manual') {
       try {
         // Set flag to prevent auto-continue from triggering
         stopRequested = true;
@@ -1881,7 +1930,12 @@
         // Only show stop message immediately if no request was in progress
         if (!showStopMessageAfterResponse) {
           appendSeparator();
-          appendLine('⏹️ Autonomous mode STOPPED', 'assistant');
+          const stopMessage = reason === 'accepted'
+            ? 'Answer accepted. Autonomous loop ended.'
+            : reason === 'stalled'
+              ? 'Autonomous mode stopped because the agent could not continue.'
+              : '⏹️ Autonomous mode STOPPED';
+          appendLine(stopMessage, 'assistant');
           appendLine(`System prompt restored to: ${data.prompt}`, 'assistant');
           appendSeparator();
         }

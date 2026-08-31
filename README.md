@@ -248,8 +248,9 @@ Because it's **beta version** it would require more work to improve the way how 
 2. Enter your goal (e.g., "Find IP, owner, and technologies used by example.com")
 3. Optionally attach a file for reference (Choose File button)
 4. Click "🚀 Start Autonomous Work"
-5. Watch the agent work continuously until goal completion
-6. Use `/autostop` to manually stop if needed
+5. Watch the agent work continuously until it proposes a candidate answer
+6. Review the answer and choose **Continue working** or **End loop**
+7. Use `/autostop` to manually stop at any time
 
 **Example Use Cases:**
 - Network reconnaissance: "Scan 192.168.1.0/24 network and create a report of all active hosts and open ports"
@@ -260,6 +261,8 @@ Because it's **beta version** it would require more work to improve the way how 
 
 **Key Features:**
 - **Goal-Oriented**: Define a high-level objective (e.g., "analyze the network security of domain.com and create a detailed report")
+- **Selected Prompt Preserved**: Autonomous mode keeps the active default, predefined, or custom system prompt and appends its generic JSON action protocol
+- **Clean Run Context**: Each new autonomous run excludes earlier messages and resets command history, retries, and partial findings while keeping the transcript visible in the UI
 - **Continuous Operation**: Agent executes commands, analyzes results, and plans next steps automatically without user intervention
 - **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
 - **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
@@ -267,7 +270,11 @@ Because it's **beta version** it would require more work to improve the way how 
   - Agent can use command-line tools (cat, grep, jq, awk, etc.) to analyze attached files
   - Useful for tasks like "analyze this log file and identify errors" or "create a report based on this configuration"
 - **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
-- **Auto-Stop**: Automatically stops when goal is achieved or proven impossible
+- **User-Controlled Completion**: Candidate answers pause the loop so you can continue working or accept the result and end the loop
+- **Decision Recovery**: Refreshing the Web UI restores a pending Continue/End decision
+- **Safe Startup**: Restarting OWRAP always disables autonomous mode and clears transient autonomous state and attachments
+- **Protocol Recovery**: Invalid JSON or unsupported actions share one three-attempt retry counter. Recovery guidance allows either a direct `answer` or another supported tool action; after the third consecutive failure, OWRAP performs the same cleanup as **Stop autonomous**
+- **Job Recovery**: Missing background job IDs and job-start failures are returned to the agent as context, and the autonomous loop continues with another step
 - **Manual Control**: `/autostop` button available for manual interruption at any time
 
 **Notes:**

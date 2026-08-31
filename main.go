@@ -50,6 +50,8 @@ type webSession struct {
 	AttachedFilePath   string          // Temp path where file is stored on disk
 	AutoAnalyze        bool            // Per-session auto-analysis mode
 	ThinkingEnabled    bool            // Per-session Ollama thinking mode
+	AwaitingDecision   bool            // Candidate autonomous answer awaits user approval
+	AutonomousStart    int             // First message included in the current autonomous run
 }
 
 type webSessionStore struct {
@@ -63,12 +65,15 @@ type persistedWebState struct {
 }
 
 type webStateResponse struct {
-	SessionID string        `json:"sessionId"`
-	Messages  []ChatMessage `json:"messages"`
-	Stats     Stats         `json:"stats"`
-	Model     string        `json:"model"`
-	Prompt    string        `json:"prompt"`
-	Thinking  bool          `json:"thinking"`
+	SessionID          string        `json:"sessionId"`
+	Messages           []ChatMessage `json:"messages"`
+	Stats              Stats         `json:"stats"`
+	Model              string        `json:"model"`
+	Prompt             string        `json:"prompt"`
+	Thinking           bool          `json:"thinking"`
+	AutonomousMode     bool          `json:"autonomousMode"`
+	AutonomousGoal     string        `json:"autonomousGoal,omitempty"`
+	AutonomousDecision bool          `json:"autonomousDecision,omitempty"`
 }
 
 func newWebSessionStore() *webSessionStore {
@@ -147,6 +152,25 @@ func (s *webSessionStore) load() error {
 		return nil
 	}
 	state.Session.ThinkingEnabled = false
+	if state.Session.AttachedFilePath != "" {
+		if tempDir, err := owrapAutonomousSessionDir(state.Session.ID); err != nil {
+			log.Printf("warning: could not resolve stale autonomous directory: %v", err)
+		} else if err := os.RemoveAll(tempDir); err != nil {
+			log.Printf("warning: could not remove stale autonomous directory: %v", err)
+		}
+	}
+	state.Session.AutonomousMode = false
+	state.Session.AutonomousGoal = ""
+	state.Session.AwaitingDecision = false
+	state.Session.AutonomousStart = 0
+	state.Session.OriginalPrompt = ""
+	state.Session.OriginalPromptName = ""
+	state.Session.RetryCount = 0
+	state.Session.CommandCount = 0
+	state.Session.PartialFindings = ""
+	state.Session.LastCommands = nil
+	state.Session.AttachedFile = nil
+	state.Session.AttachedFilePath = ""
 	state.Session.Stats.updateContext(systemPrompt, state.Session.Messages)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -282,8 +306,9 @@ type ToolResponse struct {
 }
 
 type webChatRequest struct {
-	SessionID string `json:"sessionId"`
-	Message   string `json:"message"`
+	SessionID        string `json:"sessionId"`
+	Message          string `json:"message"`
+	ResumeAutonomous bool   `json:"resumeAutonomous,omitempty"`
 }
 
 type webChatResponse struct {
@@ -301,6 +326,8 @@ type webChatResponse struct {
 	ThinkingEnabled    bool             `json:"thinkingEnabled"`
 	AutonomousMode     bool             `json:"autonomousMode,omitempty"`
 	AutonomousContinue bool             `json:"autonomousContinue,omitempty"`
+	AutonomousDecision bool             `json:"autonomousDecision,omitempty"`
+	AutonomousStop     bool             `json:"autonomousStop,omitempty"`
 	CommandCount       int              `json:"commandCount,omitempty"` // Commands executed in autonomous mode
 	JobID              string           `json:"jobId,omitempty"`
 	JobStatus          string           `json:"jobStatus,omitempty"`
@@ -315,6 +342,21 @@ type webCommandResponse struct {
 	Command   string    `json:"command"`
 	Output    string    `json:"output"`
 	Timestamp time.Time `json:"timestamp"`
+}
+
+func recoverableWebError(sess *webSession, text string) webChatResponse {
+	sess.appendMessage("assistant", text)
+	return webChatResponse{
+		SessionID:          sess.ID,
+		Action:             "error",
+		AssistantText:      text,
+		Messages:           sess.Messages,
+		Model:              modelName,
+		Timestamp:          time.Now().UTC(),
+		Stats:              sess.Stats,
+		AutonomousMode:     sess.AutonomousMode,
+		AutonomousContinue: sess.AutonomousMode,
+	}
 }
 
 type Session struct {
@@ -385,6 +427,13 @@ func (s *webSession) appendAssistant(content, thinking string) {
 func (s *webSession) appendContextMessage(role, content string) {
 	s.Messages = append(s.Messages, ChatMessage{Role: role, Content: content})
 	s.Stats.updateContext(systemPrompt, s.Messages)
+}
+
+func (s *webSession) modelMessages() []ChatMessage {
+	if s.AutonomousMode && s.AutonomousStart >= 0 && s.AutonomousStart <= len(s.Messages) {
+		return s.Messages[s.AutonomousStart:]
+	}
+	return s.Messages
 }
 
 func appendTerminalMessage(messages *[]ChatMessage, stats *Stats, role, content string) {
@@ -879,12 +928,15 @@ func handleWebState(w http.ResponseWriter, r *http.Request) {
 		sess := webStore.ensure("")
 		sess.Stats.updateContext(systemPrompt, sess.Messages)
 		writeJSON(w, http.StatusOK, webStateResponse{
-			SessionID: sess.ID,
-			Messages:  sess.Messages,
-			Stats:     sess.Stats,
-			Model:     modelName,
-			Prompt:    systemPromptName,
-			Thinking:  sess.ThinkingEnabled,
+			SessionID:          sess.ID,
+			Messages:           sess.Messages,
+			Stats:              sess.Stats,
+			Model:              modelName,
+			Prompt:             systemPromptName,
+			Thinking:           sess.ThinkingEnabled,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousGoal:     sess.AutonomousGoal,
+			AutonomousDecision: sess.AwaitingDecision,
 		})
 	case http.MethodDelete:
 		sess := webStore.reset()
@@ -894,12 +946,15 @@ func handleWebState(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, webStateResponse{
-			SessionID: sess.ID,
-			Messages:  sess.Messages,
-			Stats:     sess.Stats,
-			Model:     modelName,
-			Prompt:    systemPromptName,
-			Thinking:  sess.ThinkingEnabled,
+			SessionID:          sess.ID,
+			Messages:           sess.Messages,
+			Stats:              sess.Stats,
+			Model:              modelName,
+			Prompt:             systemPromptName,
+			Thinking:           sess.ThinkingEnabled,
+			AutonomousMode:     sess.AutonomousMode,
+			AutonomousGoal:     sess.AutonomousGoal,
+			AutonomousDecision: sess.AwaitingDecision,
 		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1074,6 +1129,9 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
+	if req.ResumeAutonomous && sess.AwaitingDecision {
+		sess.AwaitingDecision = false
+	}
 	defer func() {
 		if err := webStore.persist(); err != nil {
 			log.Printf("warning: could not persist Web UI state: %v", err)
@@ -1306,12 +1364,17 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	// Update autonomous prompt if in autonomous mode
 	if sess.AutonomousMode {
 		history := buildIterationHistory(sess)
-		systemPrompt = updateAutonomousPrompt(sess.AutonomousGoal, history)
+		if prompt, promptErr := composeAutonomousPrompt(sess.OriginalPrompt, sess.AutonomousGoal, history); promptErr == nil {
+			systemPrompt = prompt
+		} else {
+			log.Printf("warning: could not update autonomous prompt: %v", promptErr)
+		}
 	}
 
-	messages := make([]ChatMessage, 0, len(sess.Messages)+1)
+	contextMessages := sess.modelMessages()
+	messages := make([]ChatMessage, 0, len(contextMessages)+1)
 	messages = append(messages, ChatMessage{Role: "system", Content: systemPrompt})
-	messages = append(messages, sess.Messages...)
+	messages = append(messages, contextMessages...)
 
 	// Force JSON mode only in autonomous mode
 	forceJSON := sess.AutonomousMode
@@ -1371,13 +1434,9 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Reset retry count on successful JSON parse
-	if sess.AutonomousMode {
-		sess.RetryCount = 0
-	}
-
 	switch tool.Action {
 	case "run_command":
+		sess.RetryCount = 0
 		sess.Stats.recordCommand(tool.Command)
 
 		// Track command in session (keep last 3)
@@ -1463,18 +1522,11 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "run_command_bg":
+		sess.RetryCount = 0
 		sess.Stats.recordCommand(tool.Command)
 		job, err := executeBackgroundCommand(sess.ID, tool.Command)
 		if err != nil {
-			writeJSON(w, http.StatusOK, webChatResponse{
-				SessionID:     sess.ID,
-				Action:        "error",
-				AssistantText: fmt.Sprintf("Failed to start background job: %v", err),
-				Messages:      sess.Messages,
-				Model:         modelName,
-				Timestamp:     time.Now().UTC(),
-				Stats:         sess.Stats,
-			})
+			writeJSON(w, http.StatusOK, recoverableWebError(sess, fmt.Sprintf("Failed to start background job: %v", err)))
 			return
 		}
 
@@ -1499,17 +1551,10 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "check_job":
+		sess.RetryCount = 0
 		job, ok := jobStore.get(tool.JobID)
 		if !ok {
-			writeJSON(w, http.StatusOK, webChatResponse{
-				SessionID:     sess.ID,
-				Action:        "error",
-				AssistantText: fmt.Sprintf("Job not found: %s", tool.JobID),
-				Messages:      sess.Messages,
-				Model:         modelName,
-				Timestamp:     time.Now().UTC(),
-				Stats:         sess.Stats,
-			})
+			writeJSON(w, http.StatusOK, recoverableWebError(sess, fmt.Sprintf("Job not found: %s", tool.JobID)))
 			return
 		}
 
@@ -1542,17 +1587,10 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "get_job":
+		sess.RetryCount = 0
 		job, ok := jobStore.get(tool.JobID)
 		if !ok {
-			writeJSON(w, http.StatusOK, webChatResponse{
-				SessionID:     sess.ID,
-				Action:        "error",
-				AssistantText: fmt.Sprintf("Job not found: %s", tool.JobID),
-				Messages:      sess.Messages,
-				Model:         modelName,
-				Timestamp:     time.Now().UTC(),
-				Stats:         sess.Stats,
-			})
+			writeJSON(w, http.StatusOK, recoverableWebError(sess, fmt.Sprintf("Job not found: %s", tool.JobID)))
 			return
 		}
 
@@ -1587,17 +1625,10 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "cancel_job":
+		sess.RetryCount = 0
 		job, ok := jobStore.get(tool.JobID)
 		if !ok {
-			writeJSON(w, http.StatusOK, webChatResponse{
-				SessionID:     sess.ID,
-				Action:        "error",
-				AssistantText: fmt.Sprintf("Job not found: %s", tool.JobID),
-				Messages:      sess.Messages,
-				Model:         modelName,
-				Timestamp:     time.Now().UTC(),
-				Stats:         sess.Stats,
-			})
+			writeJSON(w, http.StatusOK, recoverableWebError(sess, fmt.Sprintf("Job not found: %s", tool.JobID)))
 			return
 		}
 
@@ -1638,6 +1669,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 
 	case "list_jobs":
+		sess.RetryCount = 0
 		jobs := jobStore.listBySession(sess.ID)
 		content := fmt.Sprintf("Active jobs for this session (%d):\n", len(jobs))
 		for _, job := range jobs {
@@ -1667,10 +1699,12 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		})
 
 	case "update_findings":
+		sess.RetryCount = 0
 		response := handleUpdateFindings(sess, tool)
 		writeJSON(w, http.StatusOK, response)
 
 	case "answer":
+		sess.RetryCount = 0
 		response := handleAutonomousAnswer(sess, tool)
 		if ollamaMessage.Thinking != "" && len(sess.Messages) > 0 {
 			last := &sess.Messages[len(sess.Messages)-1]
@@ -1685,6 +1719,11 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, response)
 
 	default:
+		if sess.AutonomousMode {
+			response := handleAutonomousJSONError(sess, raw, clean, fmt.Errorf("unsupported autonomous action %q", tool.Action))
+			writeJSON(w, http.StatusOK, response)
+			return
+		}
 		sess.appendMessage("assistant", raw)
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:     sess.ID,

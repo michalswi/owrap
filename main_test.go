@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -200,6 +202,9 @@ func TestAutonomousFailureMessagesAreCounted(t *testing.T) {
 	if response.Stats.AssistantMessages != 2 {
 		t.Fatalf("AssistantMessages = %d, want 2", response.Stats.AssistantMessages)
 	}
+	if !response.AutonomousStop || !sess.AutonomousMode || response.AutonomousContinue {
+		t.Fatalf("retry exhaustion did not request normal stop cleanup: session=%+v response=%+v", sess, response)
+	}
 	if len(sess.Messages) != 2 {
 		t.Fatalf("messages = %d, want 2", len(sess.Messages))
 	}
@@ -217,6 +222,142 @@ func TestAutonomousInternalPromptOnlyUpdatesContext(t *testing.T) {
 	}
 	if sess.Stats.ContextChars != len("autonomouscontinue internally") {
 		t.Fatalf("internal prompt missing from context: %+v", sess.Stats)
+	}
+}
+
+func TestComposeAutonomousPromptPreservesSelectedPrompt(t *testing.T) {
+	prompt, err := composeAutonomousPrompt(
+		"You are a concise philosophy assistant.",
+		"Who is God? Short answer.",
+		"No previous attempts yet.",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{
+		"You are a concise philosophy assistant.",
+		"Who is God? Short answer.",
+		`"action": "answer"`,
+	} {
+		if !strings.Contains(prompt, required) {
+			t.Fatalf("composed prompt missing %q", required)
+		}
+	}
+}
+
+func TestAutonomousRunExcludesEarlierMessages(t *testing.T) {
+	sess := &webSession{
+		Messages: []ChatMessage{
+			{Role: "user", Content: "old autonomous goal"},
+			{Role: "assistant", Content: "old autonomous result"},
+			{Role: "user", Content: "new autonomous goal"},
+		},
+		AutonomousMode:  true,
+		AutonomousStart: 2,
+	}
+
+	messages := sess.modelMessages()
+	if len(messages) != 1 || messages[0].Content != "new autonomous goal" {
+		t.Fatalf("autonomous model context contains earlier messages: %+v", messages)
+	}
+	history := buildIterationHistory(sess)
+	if strings.Contains(history, "old autonomous") || !strings.Contains(history, "new autonomous goal") {
+		t.Fatalf("autonomous iteration history crossed run boundary: %q", history)
+	}
+}
+
+func TestAutonomousAnswerWaitsForUserDecision(t *testing.T) {
+	previousPrompt, previousPromptName := systemPrompt, systemPromptName
+	systemPrompt, systemPromptName = "autonomous prompt", "autonomous_agent.txt"
+	t.Cleanup(func() { systemPrompt, systemPromptName = previousPrompt, previousPromptName })
+
+	sess := &webSession{
+		AutonomousMode:     true,
+		AutonomousGoal:     "finish the report",
+		OriginalPrompt:     "original prompt",
+		OriginalPromptName: "default",
+	}
+	response := handleAutonomousAnswer(sess, ToolResponse{Action: "answer", Text: "candidate answer"})
+
+	if !sess.AutonomousMode || !sess.AwaitingDecision || !response.AutonomousMode || !response.AutonomousDecision {
+		t.Fatalf("autonomous mode did not pause for a decision: session=%+v response=%+v", sess, response)
+	}
+	if response.AutonomousContinue {
+		t.Fatal("candidate answer should not auto-continue")
+	}
+	if systemPrompt != "autonomous prompt" || systemPromptName != "autonomous_agent.txt" {
+		t.Fatal("autonomous prompt was restored before the user ended the loop")
+	}
+}
+
+func TestAutonomousMissingJobContinuesLoop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{
+			Role: "assistant", Content: `{"action":"check_job","jobId":"missing-job"}`,
+		}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"next step"}`, sess.ID))
+	response := httptest.NewRecorder()
+	handleWebChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", body))
+
+	var payload webChatResponse
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || payload.Action != "error" || !payload.AutonomousMode || !payload.AutonomousContinue {
+		t.Fatalf("missing job stalled autonomous loop: status=%d payload=%+v", response.Code, payload)
+	}
+	if len(sess.Messages) < 2 || sess.Messages[len(sess.Messages)-1].Content != "Job not found: missing-job" {
+		t.Fatalf("missing-job feedback not retained in context: %+v", sess.Messages)
+	}
+}
+
+func TestAutonomousMixedProtocolFailuresCountTowardStop(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	responses := []string{
+		"not json",
+		`{"action":"check_file","url":"https://example.com"}`,
+		"still not json",
+	}
+	responseIndex := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		content := responses[responseIndex]
+		responseIndex++
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	for attempt := 1; attempt <= 3; attempt++ {
+		body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"retry"}`, sess.ID))
+		response := httptest.NewRecorder()
+		handleWebChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", body))
+
+		var payload webChatResponse
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		if attempt < 3 {
+			if payload.AutonomousStop || sess.RetryCount != attempt {
+				t.Fatalf("attempt %d retry state = %d, payload=%+v", attempt, sess.RetryCount, payload)
+			}
+		} else if !payload.AutonomousStop {
+			t.Fatalf("third protocol failure did not request stop: %+v", payload)
+		}
 	}
 }
 
@@ -273,6 +414,20 @@ func TestWebStatePersistsAcrossClientsAndRestart(t *testing.T) {
 	original := webStore.ensure("")
 	original.appendMessage("user", "shared question")
 	original.appendMessage("assistant", "shared answer")
+	original.AutonomousMode = true
+	original.AutonomousGoal = "shared goal"
+	original.AwaitingDecision = true
+	autonomousDir, err := owrapAutonomousSessionDir(original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(autonomousDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	original.AttachedFilePath = filepath.Join(autonomousDir, "attachment.txt")
+	if err := os.WriteFile(original.AttachedFilePath, []byte("stale"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	if err := webStore.persist(); err != nil {
 		t.Fatal(err)
 	}
@@ -292,8 +447,11 @@ func TestWebStatePersistsAcrossClientsAndRestart(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &restored); err != nil {
 		t.Fatal(err)
 	}
-	if restored.SessionID != original.ID || len(restored.Messages) != 2 {
+	if restored.SessionID != original.ID || len(restored.Messages) != 2 || restored.AutonomousMode || restored.AutonomousGoal != "" || restored.AutonomousDecision {
 		t.Fatalf("state not restored: %+v", restored)
+	}
+	if _, err := os.Stat(autonomousDir); !os.IsNotExist(err) {
+		t.Fatalf("stale autonomous directory still exists: %v", err)
 	}
 
 	resetResponse := httptest.NewRecorder()
