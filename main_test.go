@@ -652,7 +652,7 @@ func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
 		}
 		if strings.Contains(request.Messages[0].Content, "You are an independent critic") {
 			criticCalls++
-			approved := criticCalls > 1
+			approved := criticCalls > 3
 			feedback := ""
 			if !approved {
 				feedback = "The answer omits the requested conclusion."
@@ -663,7 +663,7 @@ func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
 		}
 		agentCalls++
 		answer := "incomplete"
-		if agentCalls > 1 {
+		if agentCalls > 3 {
 			answer = "complete revised answer"
 		}
 		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: fmt.Sprintf(`{"action":"answer","text":%q}`, answer)}})
@@ -681,8 +681,17 @@ func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
 	runAutonomousAgent(ctx, sess)
 
 	run := sess.autonomousSnapshot()
-	if run.Status != autonomousWaitingApproval || run.FinalAnswer != "complete revised answer" || agentCalls != 2 || criticCalls != 2 {
+	if run.Status != autonomousWaitingApproval || run.FinalAnswer != "complete revised answer" || agentCalls != 4 || criticCalls != 4 {
 		t.Fatalf("critic revision flow failed: agentCalls=%d criticCalls=%d run=%+v", agentCalls, criticCalls, run)
+	}
+	foundRejectedCandidate := false
+	for _, event := range run.Events {
+		if event.Kind == "candidate" && event.Text == "incomplete" {
+			foundRejectedCandidate = true
+		}
+	}
+	if !foundRejectedCandidate {
+		t.Fatalf("rejected candidate missing from run context: %+v", run.Events)
 	}
 }
 

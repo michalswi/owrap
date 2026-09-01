@@ -122,7 +122,7 @@ The HTTP client creates context-aware requests, so cancellation propagates to Ol
 - A runtime-only cancellation function for the active autonomous worker.
 - Optional attachment metadata and temporary path.
 
-Autonomous run statuses are `running`, `waiting_approval`, `waiting_input`, `completed`, `failed`, `cancelled`, and `limit_reached`. Events record model actions, tool observations, plan updates, critic verification, clarification, user feedback, answers, and failures in sequence order.
+Autonomous run statuses are `running`, `waiting_approval`, `waiting_input`, `completed`, `failed`, `cancelled`, and `limit_reached`. Events record model actions, tool observations, rejected candidates, plan updates, critic verification, clarification, user feedback, approved answers, and failures in sequence order.
 
 `ToolResponse` supports these action fields:
 
@@ -203,7 +203,7 @@ HTTP endpoints:
 
 Web chat recognizes `/auto-on`, `/auto-off`, `/think-on`, `/think-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
 
-The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For autonomous work, JavaScript starts a run once and polls `/api/autonomous/status` every second; it observes sequenced events and submits stop, approval, revision-feedback, or clarification decisions but does not drive model iterations. Starting a run resets the global prompt and the run's immutable base prompt to the built-in `default`, then appends the domain-neutral JSON protocol from `prompts/autonomous_agent.txt`. Earlier chat and autonomous messages remain visible but are excluded from the run's token-budgeted event context. An `answer` is independently verified before changing the run to `waiting_approval`; `request_clarification` changes it to `waiting_input`. Normal chat remains disabled in both states. Malformed JSON and unsupported actions share one three-attempt failure counter, while tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
+The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For autonomous work, JavaScript starts a run once and polls `/api/autonomous/status` every second; it observes sequenced events and submits stop, approval, revision-feedback, or clarification decisions but does not drive model iterations. Starting a run resets the global prompt and the run's immutable base prompt to the built-in `default`, then appends the domain-neutral JSON protocol from `prompts/autonomous_agent.txt`. Earlier chat and autonomous messages remain visible but are excluded from the run's token-budgeted event context. An `answer` is independently verified before changing the run to `waiting_approval`; rejected candidate text and critic feedback are returned to model context for revision. `request_clarification` changes the run to `waiting_input`. Normal chat remains disabled in both states. Malformed JSON, model-call errors, and unsupported actions share one three-attempt failure counter. Critic revisions do not consume that counter and remain bounded by the run's iteration and time limits. Tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
 
 ## Prompt System
 
@@ -280,6 +280,7 @@ Autonomous state management includes:
 - Two-minute model-call and foreground-command deadlines.
 - Tool observations truncated to 32 KiB before entering model context.
 - Up to three consecutive protocol or model failures.
+- Critic-rejected candidate text and feedback are retained in model context; revisions are bounded by the overall iteration and run deadlines rather than the protocol-failure counter.
 - Strict single-object JSON decoding with unknown fields rejected.
 - A completion gate that requires an observation when the goal explicitly names an allowlisted command.
 - After an initial failed foreground command, only a corrected or alternative `run_command` action is accepted; after two command failures, a claimed impossibility still requires critic approval.

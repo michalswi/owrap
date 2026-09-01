@@ -305,6 +305,7 @@ func runAutonomousAgent(ctx context.Context, sess *webSession) {
 				if feedback == "" {
 					feedback = "Candidate answer did not satisfy the goal and completion criteria."
 				}
+				sess.appendAutonomousEvent(AutonomousEvent{Kind: "candidate", Action: "answer", Text: action.Text, Thinking: response.Thinking})
 				if !recordAutonomousRevision(sess, feedback, verification.EvidenceEventIDs) {
 					return
 				}
@@ -371,6 +372,8 @@ func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
 			messages = append(messages, ChatMessage{Role: "user", Content: "User feedback:\n" + event.Text})
 		case "verification":
 			messages = append(messages, ChatMessage{Role: "user", Content: "Independent critic feedback:\n" + event.Text})
+		case "candidate":
+			messages = append(messages, ChatMessage{Role: "assistant", Content: "Rejected candidate answer:\n" + event.Text})
 		case "plan":
 			messages = append(messages, ChatMessage{Role: "user", Content: "Plan update:\n" + event.Text})
 		}
@@ -558,7 +561,7 @@ func verifyAutonomousAnswer(ctx context.Context, sess *webSession, candidate str
 	evidenceJSON, _ := json.Marshal(evidence)
 	planJSON, _ := json.Marshal(run.Plan)
 	messages := []ChatMessage{
-		{Role: "system", Content: "You are an independent critic. Verify a candidate autonomous-agent answer against the objective, expected output, constraints, completion criteria, plan, and recorded events. Approve only supported and complete answers. Return exactly one JSON object: {\"approved\":true|false,\"feedback\":\"specific reason or empty\",\"evidenceEventIds\":[1,2]}. Cite only event IDs that directly support the answer. Knowledge-only answers may use an empty evidence list."},
+		{Role: "system", Content: "You are an independent critic. Verify the exact candidate autonomous-agent answer against the objective, expected output, constraints, completion criteria, plan, user feedback, and recorded events. Approve only if the candidate itself contains the complete requested deliverable. Never assume promised, described, or omitted content exists; a preamble without its claimed output is incomplete. Return exactly one JSON object: {\"approved\":true|false,\"feedback\":\"specific reason or empty\",\"evidenceEventIds\":[1,2]}. Cite only event IDs that directly support the answer. Knowledge-only answers may use an empty evidence list."},
 		{Role: "user", Content: autonomousGoalDescription(run) + "\n\nPLAN:\n" + string(planJSON) + "\n\nCANDIDATE ANSWER:\n" + candidate + "\n\nRECORDED EVENTS:\n" + string(evidenceJSON)},
 	}
 	verifyCtx, cancel := context.WithTimeout(ctx, autonomousModelTimeout)
@@ -823,14 +826,9 @@ func recordAutonomousRevision(sess *webSession, message string, evidenceEventIDs
 		sess.mu.Unlock()
 		return false
 	}
-	sess.AutonomousRun.ConsecutiveErrors++
-	failures := sess.AutonomousRun.ConsecutiveErrors
+	sess.AutonomousRun.ConsecutiveErrors = 0
 	sess.mu.Unlock()
 	sess.appendAutonomousEvent(AutonomousEvent{Kind: "verification", Action: "answer", Text: message, EvidenceEventIDs: evidenceEventIDs})
-	if failures >= 3 {
-		finishAutonomous(sess, autonomousFailed, "", message)
-		return false
-	}
 	return true
 }
 
