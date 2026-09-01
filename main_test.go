@@ -149,12 +149,12 @@ func TestWebThinkingToggleAndResponsePersistence(t *testing.T) {
 	}
 
 	restartedStore := newWebSessionStore()
-	if err := restartedStore.load(); err != nil {
+	if err := restartedStore.initializeFresh(); err != nil {
 		t.Fatal(err)
 	}
 	restored, ok := restartedStore.active()
-	if !ok || restored.ThinkingEnabled || restored.Messages[1].Thinking != "reasoning trace" {
-		t.Fatalf("thinking state not persisted: %+v", restored)
+	if !ok || restored.ThinkingEnabled || len(restored.Messages) != 0 {
+		t.Fatalf("restart did not create fresh state: %+v", restored)
 	}
 }
 
@@ -465,7 +465,7 @@ func TestBackendAutonomousRunRetriesCommandAfterFailedExecution(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{
 		`{"action":"run_command","command":"sh -c 'exit 1'"}`,
-		`{"action":"answer","text":"could not complete"}`,
+		`{"action":"update_findings","text":"the first command failed"}`,
 		`{"action":"run_command","command":"echo recovered"}`,
 		`{"action":"answer","text":"completed after retry"}`,
 	}
@@ -501,6 +501,9 @@ func TestBackendAutonomousRunRetriesCommandAfterFailedExecution(t *testing.T) {
 	run := sess.autonomousSnapshot()
 	if run.Status != autonomousWaitingApproval || run.FinalAnswer != "completed after retry" || responseIndex != 4 || criticCalls != 1 {
 		t.Fatalf("failed command recovery did not complete: responses=%d critics=%d run=%+v", responseIndex, criticCalls, run)
+	}
+	if sess.PartialFindings != "" {
+		t.Fatalf("non-command action bypassed recovery requirement: %q", sess.PartialFindings)
 	}
 	if command, failed := latestAutonomousCommandFailure(run.Events); failed || command != "echo recovered" {
 		t.Fatalf("latest command failure state was not cleared: command=%q failed=%v", command, failed)
@@ -886,7 +889,7 @@ func TestStatsTimingAndSessionPersistence(t *testing.T) {
 	}
 }
 
-func TestWebStatePersistsAcrossClientsAndRestart(t *testing.T) {
+func TestWebStateStartsFreshAfterRestart(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	previousStore := webStore
 	t.Cleanup(func() { webStore = previousStore })
@@ -914,7 +917,7 @@ func TestWebStatePersistsAcrossClientsAndRestart(t *testing.T) {
 	}
 
 	restartedStore := newWebSessionStore()
-	if err := restartedStore.load(); err != nil {
+	if err := restartedStore.initializeFresh(); err != nil {
 		t.Fatal(err)
 	}
 	webStore = restartedStore
@@ -928,8 +931,8 @@ func TestWebStatePersistsAcrossClientsAndRestart(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &restored); err != nil {
 		t.Fatal(err)
 	}
-	if restored.SessionID != original.ID || len(restored.Messages) != 2 || restored.AutonomousMode || restored.AutonomousGoal != "" || restored.AutonomousDecision {
-		t.Fatalf("state not restored: %+v", restored)
+	if restored.SessionID == original.ID || len(restored.Messages) != 0 || restored.AutonomousMode || restored.AutonomousGoal != "" || restored.AutonomousDecision {
+		t.Fatalf("restart did not clear state: %+v", restored)
 	}
 	if _, err := os.Stat(autonomousDir); !os.IsNotExist(err) {
 		t.Fatalf("stale autonomous directory still exists: %v", err)

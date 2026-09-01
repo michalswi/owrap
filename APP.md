@@ -40,7 +40,7 @@ Keep these boundaries in mind when reasoning about the app:
 - `vars.go`: version, default system prompt, environment-derived configuration, global CLI state, and web help text.
 - `banner.go`: terminal banner.
 - `utils/utils.go`: environment lookup and startup system-prompt loading.
-- `webstatic/index.html`: complete browser UI, server-state restoration, local preferences, API calls, autonomous status observer, and attachment reader.
+- `webstatic/index.html`: complete browser UI, process-lifetime server-state restoration, local preferences, API calls, autonomous status observer, and attachment reader.
 - `prompts/*.txt`: predefined role prompts and the autonomous-agent protocol prompt.
 - `Makefile`: native, cross-platform, and multi-architecture Docker build targets.
 - `Dockerfile`: multi-stage image that runs web mode as an unprivileged `app` user.
@@ -181,7 +181,7 @@ Session loading restores active conversational context. Saved sessions can there
 
 Web mode uses `net/http.ServeMux`. The binary embeds `webstatic/*` with `go:embed`; `index.html` is served at `/`, and embedded files are exposed under `/static/`.
 
-The Go server owns one active Web UI session and persists it to `~/.owrap/web_state.json`. A newly opened browser restores structured messages and stats through `GET /api/state`; `localStorage` is only a fallback for UI state and stores theme preferences. A generated session ID has the form `sess_<UnixNano>`.
+The Go server owns one active Web UI session and persists it to `~/.owrap/web_state.json` during the process lifetime. A newly opened or refreshed browser restores structured messages and stats through `GET /api/state`; `localStorage` is only a fallback for UI state and stores theme preferences. Starting OWRAP initializes and persists a fresh session rather than restoring the previous process's active chat. A generated session ID has the form `sess_<UnixNano>`.
 
 HTTP endpoints:
 
@@ -284,7 +284,7 @@ Autonomous state management includes:
 - A completion gate that requires an observation when the goal explicitly names an allowlisted command.
 - Per-run cancellation for foreground commands and background jobs.
 
-The server worker owns the loop. Closing or refreshing the browser does not stop progress; the UI reconstructs it from persisted status and events.
+The server worker owns the loop. Closing or refreshing the browser does not stop progress while OWRAP remains running; the UI reconstructs it from persisted status and events.
 
 The autonomous prompt is designed for larger local models and insists on a single raw JSON object. It encourages different approaches after failures and a comprehensive final report only when the goal is complete or proven impossible.
 
@@ -292,7 +292,7 @@ The autonomous prompt is designed for larger local models and insists on a singl
 
 CLI and web saves use JSON files in `~/.owrap/sessions`. An omitted name produces `owrap_YYYYMMDD_HHMM.json`; a supplied name receives `.json` if needed. Files are sorted alphabetically when listed.
 
-The active Web conversation and autonomous run snapshot are restored after process restart from `~/.owrap/web_state.json`. A persisted `running` run is marked `failed` because execution cannot safely resume; `waiting_approval` and `waiting_input` runs remain reviewable. Background job process metadata remains memory-only and is not resumable after restart.
+Starting OWRAP creates a fresh active Web conversation, removes stale autonomous attachments, and replaces `~/.owrap/web_state.json`. Previous conversations remain available only when explicitly saved under `~/.owrap/sessions` and restored with `/load`. Browser refreshes during the same process still restore the active chat and autonomous run. Background job process metadata remains memory-only.
 
 Autonomous attachments are temporary and terminal run cleanup removes the session directory. A waiting-approval or waiting-input run retains its attachment until it continues, is accepted where applicable, or is stopped.
 
@@ -328,7 +328,7 @@ Do not overstate the current guarantees. Account for these implementation realit
 8. **Prompt/tool mismatch exists.** The autonomous and shell-assistant prompts recommend `uname`, but `uname` is absent from the simple-command allowlist.
 9. **CLI prompt editing is not fully applied to existing context.** Displayed global prompt state can diverge from the system message actually sent in the CLI conversation.
 10. **Statistics are approximate.** Some raw fallback responses and command-output messages are appended without incrementing assistant counters.
-11. **Autonomous recovery is fail-safe, not resumable.** Action intent is persisted before execution, but interrupted running work is marked failed instead of replayed after restart.
+11. **Autonomous runs do not survive application restart.** Action intent is persisted for process-lifetime recovery and audit, but startup intentionally creates a fresh chat instead of replaying interrupted work.
 12. **Build metadata has a naming mismatch.** The Makefile injects `main.Version`, while the source declares lowercase `version`; the linker override therefore does not target that variable.
 13. **README security wording is stronger than the implementation.** README says model commands are allowlisted, but shell and background paths mean that is not universally true.
 

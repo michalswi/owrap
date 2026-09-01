@@ -277,14 +277,14 @@ func runAutonomousAgent(ctx context.Context, sess *webSession) {
 			}
 			continue
 		}
-		if action.Action == "answer" {
-			if command, failed := latestAutonomousCommandFailure(run.Events); failed && consecutiveAutonomousCommandFailures(run.Events) < 2 {
-				message := fmt.Sprintf("The latest command attempt failed: %q. Inspect its observation and return run_command with a corrected or alternative command before answering.", command)
-				if !recordAutonomousRevision(sess, message, nil) {
-					return
-				}
-				continue
+		if command, required := autonomousCommandRecoveryRequired(run.Events); required && action.Action != "run_command" {
+			message := fmt.Sprintf("The latest command attempt failed: %q. Inspect its observation. Your next action must be run_command with a corrected or alternative command.", command)
+			if !recordAutonomousRevision(sess, message, nil) {
+				return
 			}
+			continue
+		}
+		if action.Action == "answer" {
 			if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
 				message := fmt.Sprintf("goal requires executing %q before answering; return run_command with that command", command)
 				sess.appendAutonomousEvent(AutonomousEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
@@ -349,6 +349,9 @@ func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
 	messages := []ChatMessage{{Role: "system", Content: prompt}}
 	if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
 		messages[0].Content += fmt.Sprintf("\n\nEXECUTION REQUIREMENT: The goal explicitly requires %q. You must return run_command using %q and inspect its real output before returning answer. A description, refusal, or hypothetical result is not completion.", command, command)
+	}
+	if command, required := autonomousCommandRecoveryRequired(run.Events); required {
+		messages[0].Content += fmt.Sprintf("\n\nCOMMAND RECOVERY REQUIREMENT: The latest command attempt failed: %q. Your next action must be run_command with corrected syntax or an alternative command. Do not answer, update findings, change the plan, or request clarification before making that attempt.", command)
 	}
 	if run.ContextSummary != "" {
 		messages = append(messages, ChatMessage{Role: "user", Content: "Earlier run summary:\n" + run.ContextSummary})
@@ -420,6 +423,11 @@ func latestAutonomousCommandFailure(events []AutonomousEvent) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func autonomousCommandRecoveryRequired(events []AutonomousEvent) (string, bool) {
+	command, failed := latestAutonomousCommandFailure(events)
+	return command, failed && consecutiveAutonomousCommandFailures(events) < 2
 }
 
 func consecutiveAutonomousCommandFailures(events []AutonomousEvent) int {

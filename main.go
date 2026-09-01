@@ -137,63 +137,16 @@ func (s *webSessionStore) reset() *webSession {
 	return s.createLocked()
 }
 
-func (s *webSessionStore) load() error {
-	path, err := owrapWebStatePath()
+func (s *webSessionStore) initializeFresh() error {
+	baseDir, err := owrapHomeDir()
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		return fmt.Errorf("failed to read web state: %w", err)
+	if err := os.RemoveAll(filepath.Join(baseDir, "autonomous_files")); err != nil {
+		return fmt.Errorf("failed to remove stale autonomous files: %w", err)
 	}
-	var state persistedWebState
-	if err := json.Unmarshal(data, &state); err != nil {
-		return fmt.Errorf("failed to decode web state: %w", err)
-	}
-	if state.Session == nil || state.Session.ID == "" {
-		return nil
-	}
-	state.Session.ThinkingEnabled = false
-	runWasWaiting := state.Session.AutonomousRun != nil && (state.Session.AutonomousRun.Status == autonomousWaitingApproval || state.Session.AutonomousRun.Status == autonomousWaitingInput)
-	if state.Session.AutonomousRun != nil && state.Session.AutonomousRun.Status == autonomousRunning {
-		now := time.Now().UTC()
-		state.Session.AutonomousRun.Status = autonomousFailed
-		state.Session.AutonomousRun.Error = "run interrupted by application restart"
-		state.Session.AutonomousRun.UpdatedAt = now
-		state.Session.AutonomousRun.CompletedAt = now
-	}
-	if state.Session.AttachedFilePath != "" && !runWasWaiting {
-		if tempDir, err := owrapAutonomousSessionDir(state.Session.ID); err != nil {
-			log.Printf("warning: could not resolve stale autonomous directory: %v", err)
-		} else if err := os.RemoveAll(tempDir); err != nil {
-			log.Printf("warning: could not remove stale autonomous directory: %v", err)
-		}
-	}
-	state.Session.AutonomousMode = runWasWaiting
-	state.Session.AwaitingDecision = runWasWaiting
-	if !runWasWaiting {
-		state.Session.AutonomousGoal = ""
-	}
-	state.Session.AutonomousStart = 0
-	state.Session.OriginalPrompt = ""
-	state.Session.OriginalPromptName = ""
-	state.Session.RetryCount = 0
-	state.Session.CommandCount = 0
-	state.Session.PartialFindings = ""
-	state.Session.LastCommands = nil
-	if !runWasWaiting {
-		state.Session.AttachedFile = nil
-		state.Session.AttachedFilePath = ""
-	}
-	state.Session.Stats.updateContext(systemPrompt, state.Session.Messages)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.sessions = map[string]*webSession{state.Session.ID: state.Session}
-	s.activeID = state.Session.ID
-	return nil
+	s.reset()
+	return s.persist()
 }
 
 func (s *webSessionStore) persist() error {
@@ -948,8 +901,8 @@ func splitRedirection(fields []string) (args []string, redirectFile string, appe
 }
 
 func startWebUI(bindAddr string) error {
-	if err := webStore.load(); err != nil {
-		log.Printf("warning: could not restore Web UI state: %v", err)
+	if err := webStore.initializeFresh(); err != nil {
+		log.Printf("warning: could not initialize fresh Web UI state: %v", err)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat", handleWebChat)

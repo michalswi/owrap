@@ -2027,6 +2027,10 @@
           appendLine(event.text || 'Autonomous plan updated.', 'plain');
         } else if (event.kind === 'verification') {
           appendLine(`Revision required: ${event.text}`, 'plain');
+        } else if (event.kind === 'clarification') {
+          appendLine(`Assistant: ${event.text}`, 'assistant');
+        } else if (event.kind === 'feedback') {
+          appendLine(`User: ${event.text}`, 'user');
         } else if (event.kind === 'error' || event.kind === 'invalid_action') {
           appendLine(event.text || 'Autonomous action failed.', 'error');
         }
