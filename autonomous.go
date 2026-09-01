@@ -20,9 +20,12 @@ type FileAttachment struct {
 }
 
 type AutoStartRequest struct {
-	SessionID string          `json:"sessionId"`
-	Goal      string          `json:"goal"`
-	File      *FileAttachment `json:"file,omitempty"`
+	SessionID          string          `json:"sessionId"`
+	Goal               string          `json:"goal"`
+	ExpectedOutput     string          `json:"expectedOutput,omitempty"`
+	Constraints        string          `json:"constraints,omitempty"`
+	CompletionCriteria string          `json:"completionCriteria,omitempty"`
+	File               *FileAttachment `json:"file,omitempty"`
 }
 
 // handleAutonomousStart activates autonomous mode for a session
@@ -45,7 +48,7 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
-	if run := sess.autonomousSnapshot(); run != nil && (run.Status == autonomousRunning || run.Status == autonomousWaitingApproval) {
+	if run := sess.autonomousSnapshot(); run != nil && (run.Status == autonomousRunning || run.Status == autonomousWaitingApproval || run.Status == autonomousWaitingInput) {
 		http.Error(w, "an autonomous run is already active", http.StatusConflict)
 		return
 	}
@@ -107,6 +110,12 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run := newAutonomousRun(sess.ID, goalDescription, basePrompt, basePromptName)
+	run.GoalSpec = normalizeAutonomousGoalSpec(AutonomousGoalSpec{
+		Objective:          req.Goal,
+		ExpectedOutput:     req.ExpectedOutput,
+		Constraints:        req.Constraints,
+		CompletionCriteria: req.CompletionCriteria,
+	})
 	ctx, cancel := autonomousRunContext()
 	done := make(chan struct{})
 	sess.mu.Lock()
@@ -230,14 +239,18 @@ func handleAutonomousDecision(w http.ResponseWriter, r *http.Request) {
 	}
 	sess := webStore.ensure(req.SessionID)
 	run := sess.autonomousSnapshot()
-	if run == nil || run.Status != autonomousWaitingApproval {
-		http.Error(w, "no autonomous answer is awaiting approval", http.StatusConflict)
+	if run == nil || (run.Status != autonomousWaitingApproval && run.Status != autonomousWaitingInput) {
+		http.Error(w, "no autonomous decision is awaiting input", http.StatusConflict)
 		return
 	}
 
 	switch req.Decision {
 	case "continue":
 		feedback := strings.TrimSpace(req.Feedback)
+		if feedback == "" && run.Status == autonomousWaitingInput {
+			http.Error(w, "clarification feedback required", http.StatusBadRequest)
+			return
+		}
 		if feedback == "" {
 			feedback = "The candidate answer is incomplete. Review the goal, address remaining gaps, and improve it."
 		}
@@ -259,6 +272,10 @@ func handleAutonomousDecision(w http.ResponseWriter, r *http.Request) {
 			runAutonomousAgent(ctx, sess)
 		}()
 	case "accept":
+		if run.Status == autonomousWaitingInput {
+			http.Error(w, "clarification cannot be accepted as a final answer", http.StatusBadRequest)
+			return
+		}
 		finishAutonomous(sess, autonomousCompleted, run.FinalAnswer, "")
 	default:
 		http.Error(w, "decision must be continue or accept", http.StatusBadRequest)

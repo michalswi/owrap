@@ -245,11 +245,11 @@ Because it's **beta version** it would require more work to improve the way how 
 
 **How to Use:**
 1. Click `/autostart` button in web UI
-2. Enter your goal (e.g., "Find IP, owner, and technologies used by example.com")
+2. Enter the objective, expected output, completion criteria, and any constraints
 3. Optionally attach a file for reference (Choose File button)
-4. Click "🚀 Start Autonomous Work"
-5. Watch the agent work continuously until it proposes a candidate answer
-6. Review the answer and choose **Continue working** or **End loop**
+4. Click **Start Autonomous Work**
+5. Watch the agent plan and work until it proposes a candidate answer or asks for clarification
+6. Supply requested clarification, or review the answer and choose **Continue working** or **End loop**
 7. Use `/autostop` to manually stop at any time
 
 **Example Use Cases:**
@@ -261,9 +261,15 @@ Because it's **beta version** it would require more work to improve the way how 
 
 **Key Features:**
 - **Goal-Oriented**: Define a high-level objective (e.g., "analyze the network security of domain.com and create a detailed report")
+- **Structured Goal Contract**: Record the objective, expected output, constraints, and explicit completion criteria separately
 - **Selected Prompt Preserved**: Autonomous mode keeps the active default, predefined, or custom system prompt and appends its generic JSON action protocol
 - **Clean Run Context**: Each new autonomous run excludes earlier messages and resets command history, retries, and partial findings while keeping the transcript visible in the UI
 - **Server-Owned Execution**: A backend worker executes, observes, and plans each step; the run continues when the browser is refreshed or closed
+- **Environment-Aware**: The run tells the model which allowlisted commands are installed, which are unavailable, the operating system, and the working directory
+- **Adaptive Context**: Recent events are selected by a 4096-token budget; older events are condensed into a persisted semantic summary while the full event log remains available for audit
+- **Explicit Planning**: Multi-step work can create a plan, complete steps, and associate evidence event IDs with completed steps
+- **Independent Verification**: A separate critic model call checks each candidate against the goal, plan, completion criteria, and recorded evidence before showing it for approval
+- **Clarification Loop**: Ambiguous work can pause with a specific question; normal chat stays locked while the user supplies feedback and the run resumes
 - **Bounded Operation**: Runs stop after 30 iterations or 30 minutes; model calls and foreground commands each have two-minute deadlines
 - **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
 - **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
@@ -272,10 +278,11 @@ Because it's **beta version** it would require more work to improve the way how 
   - Useful for tasks like "analyze this log file and identify errors" or "create a report based on this configuration"
 - **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
 - **User-Controlled Completion**: Candidate answers pause the loop so you can continue working or accept the result and end the loop
-- **Decision Recovery**: Refreshing the Web UI restores a pending Continue/End decision
-- **Durable Lifecycle**: Run status and sequenced events are persisted. A run interrupted by an OWRAP restart is marked failed, while a pending candidate answer remains available for review
+- **Decision Recovery**: Refreshing the Web UI restores a pending approval or clarification decision
+- **Durable Lifecycle**: Run status and sequenced events are persisted. A run interrupted while executing is marked failed, while pending approval and clarification states remain reviewable
 - **Protocol Recovery**: Invalid JSON or unsupported actions share one three-attempt retry counter. Recovery guidance allows either a direct `answer` or another supported tool action; after the third consecutive failure, OWRAP performs the same cleanup as **Stop autonomous**
-- **Execution Evidence**: When a goal explicitly names an allowlisted command, OWRAP rejects candidate answers until that command has produced a real observation
+- **Execution Evidence**: When a goal explicitly names an allowlisted command, OWRAP rejects candidate answers until that command has produced a successful real observation
+- **Failed-Command Recovery**: After an initial foreground-command failure, the agent must inspect the observation and attempt a corrected or alternative command; repeated failures can be reported only after critic verification
 - **Job Recovery**: Missing background job IDs and job-start failures are returned to the agent as context, and the autonomous loop continues with another step
 - **Run-Owned Jobs**: Stopping or terminating a run cancels its active background jobs
 - **Manual Control**: `/autostop` button available for manual interruption at any time

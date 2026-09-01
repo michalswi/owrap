@@ -118,11 +118,11 @@ The HTTP client creates context-aware requests, so Web request cancellation prop
 - Messages and stats.
 - Per-session auto-analysis flag.
 - Per-session thinking flag, default disabled.
-- An `AutonomousRun` snapshot with immutable prompt metadata, status, limits, result, error, and sequenced events.
+- An `AutonomousRun` snapshot with immutable prompt metadata, structured goal fields, detected environment capabilities, plan, compacted summary, status, limits, result, error, and sequenced events.
 - A runtime-only cancellation function for the active autonomous worker.
 - Optional attachment metadata and temporary path.
 
-Autonomous run statuses are `running`, `waiting_approval`, `completed`, `failed`, `cancelled`, and `limit_reached`. Events record model actions, tool observations, user feedback, answers, and failures in sequence order.
+Autonomous run statuses are `running`, `waiting_approval`, `waiting_input`, `completed`, `failed`, `cancelled`, and `limit_reached`. Events record model actions, tool observations, plan updates, critic verification, clarification, user feedback, answers, and failures in sequence order.
 
 `ToolResponse` supports these action fields:
 
@@ -130,8 +130,11 @@ Autonomous run statuses are `running`, `waiting_approval`, `completed`, `failed`
 - `command`
 - `text`
 - `jobId`
+- `steps`
+- `stepId`
+- `evidenceEventIds`
 
-Recognized action values are `answer`, `run_command`, `run_command_bg`, `check_job`, `get_job`, `cancel_job`, `list_jobs`, and `update_findings`.
+Recognized action values are `answer`, `request_clarification`, `create_plan`, `complete_step`, `run_command`, `run_command_bg`, `check_job`, `get_job`, `cancel_job`, `list_jobs`, and `update_findings`.
 
 ## CLI Flow
 
@@ -200,7 +203,7 @@ HTTP endpoints:
 
 Web chat recognizes `/auto-on`, `/auto-off`, `/think-on`, `/think-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
 
-The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For autonomous work, JavaScript starts a run once and polls `/api/autonomous/status` every second; it observes sequenced events and submits stop or approval decisions but does not drive model iterations. The backend captures the selected default, predefined, or custom prompt for the run and appends the domain-neutral JSON protocol from `prompts/autonomous_agent.txt`. Earlier chat and autonomous messages remain visible but are excluded from the run's bounded event context. An `answer` changes the run to `waiting_approval`; the UI then offers **Continue working** or **End loop**. Malformed JSON and unsupported actions share one three-attempt failure counter, while tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
+The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For autonomous work, JavaScript starts a run once and polls `/api/autonomous/status` every second; it observes sequenced events and submits stop, approval, revision-feedback, or clarification decisions but does not drive model iterations. The backend captures the selected default, predefined, or custom prompt for the run and appends the domain-neutral JSON protocol from `prompts/autonomous_agent.txt`. Earlier chat and autonomous messages remain visible but are excluded from the run's token-budgeted event context. An `answer` is independently verified before changing the run to `waiting_approval`; `request_clarification` changes it to `waiting_input`. Normal chat remains disabled in both states. Malformed JSON and unsupported actions share one three-attempt failure counter, while tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
 
 ## Prompt System
 
@@ -257,18 +260,22 @@ Background jobs have IDs like `job_<UnixNano>` and statuses `running`, `complete
 
 Autonomous mode is beta and web-only. Its intended lifecycle is:
 
-1. The browser submits a required goal and optional file attachment.
+1. The browser submits a required objective, optional expected output, constraints, completion criteria, and optional file attachment.
 2. The server creates or reuses a web session and captures the current global prompt in a new `AutonomousRun`.
 3. Attachment content is written under `~/.owrap/autonomous_files/<session-id>/`.
 4. The run is persisted before its backend worker starts.
-5. The worker composes the captured prompt with `prompts/autonomous_agent.txt` and sends bounded event history to Ollama in JSON mode.
-6. The agent runs commands, starts or checks run-owned jobs, records findings, or returns a candidate answer.
-7. A candidate answer pauses in `waiting_approval`; user feedback starts another worker, while acceptance completes the run.
-8. Stop, failure, cancellation, and limits terminate the worker, cancel run-owned jobs, and remove temporary attachments.
+5. The worker composes the captured prompt with `prompts/autonomous_agent.txt`, the detected runtime capabilities, the current plan, the persisted summary, and recent token-budgeted events.
+6. The agent creates or updates a plan, runs commands, starts or checks run-owned jobs, records findings, asks for clarification, or returns a candidate answer.
+7. Clarification pauses in `waiting_input`; user feedback starts another worker.
+8. A separate critic verifies a candidate against the goal, plan, and evidence before it pauses in `waiting_approval`; revision feedback starts another worker, while acceptance completes the run.
+9. Stop, failure, cancellation, and limits terminate the worker, cancel run-owned jobs, and remove temporary attachments.
 
 Autonomous state management includes:
 
-- A sequenced event log, with the most recent 12 events included in model context.
+- A complete persisted event log plus a 4096-token recent-event context budget.
+- Semantic compaction of older events into a persisted summary, with a 768-token summary instruction budget.
+- Runtime detection of installed and unavailable allowlisted commands, operating system, and working directory.
+- Structured plans with evidence references and independent candidate-answer verification.
 - A maximum of 30 iterations and a 30-minute overall deadline.
 - Two-minute model-call and foreground-command deadlines.
 - Tool observations truncated to 32 KiB before entering model context.
@@ -285,9 +292,9 @@ The autonomous prompt is designed for larger local models and insists on a singl
 
 CLI and web saves use JSON files in `~/.owrap/sessions`. An omitted name produces `owrap_YYYYMMDD_HHMM.json`; a supplied name receives `.json` if needed. Files are sorted alphabetically when listed.
 
-The active Web conversation and autonomous run snapshot are restored after process restart from `~/.owrap/web_state.json`. A persisted `running` run is marked `failed` because execution cannot safely resume; a `waiting_approval` run remains reviewable. Background job process metadata remains memory-only and is not resumable after restart.
+The active Web conversation and autonomous run snapshot are restored after process restart from `~/.owrap/web_state.json`. A persisted `running` run is marked `failed` because execution cannot safely resume; `waiting_approval` and `waiting_input` runs remain reviewable. Background job process metadata remains memory-only and is not resumable after restart.
 
-Autonomous attachments are temporary and terminal run cleanup removes the session directory. A waiting-approval run retains its attachment until it continues, is accepted, or is stopped.
+Autonomous attachments are temporary and terminal run cleanup removes the session directory. A waiting-approval or waiting-input run retains its attachment until it continues, is accepted where applicable, or is stopped.
 
 ## Build and Deployment
 

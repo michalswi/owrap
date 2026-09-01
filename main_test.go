@@ -38,6 +38,33 @@ func TestWebSessionAppendMessageUpdatesStatsAndContext(t *testing.T) {
 	}
 }
 
+func writeAutonomousCriticApproval(w http.ResponseWriter, r *http.Request) bool {
+	var request ChatRequest
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) == 0 {
+		return false
+	}
+	if !strings.Contains(request.Messages[0].Content, "You are an independent critic") {
+		return false
+	}
+	var evidenceIDs []int
+	if len(request.Messages) > 1 {
+		const marker = "RECORDED EVENTS:\n"
+		if index := strings.Index(request.Messages[1].Content, marker); index >= 0 {
+			var events []AutonomousEvent
+			if json.Unmarshal([]byte(request.Messages[1].Content[index+len(marker):]), &events) == nil {
+				for _, event := range events {
+					if event.Kind == "observation" && event.Success {
+						evidenceIDs = append(evidenceIDs, event.Sequence)
+					}
+				}
+			}
+		}
+	}
+	verification, _ := json.Marshal(AutonomousVerification{Approved: true, EvidenceEventIDs: evidenceIDs})
+	writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: string(verification)}})
+	return true
+}
+
 func TestCallOllamaThinkingProtocol(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -308,7 +335,10 @@ func TestBackendAutonomousRunExecutesUntilAnswer(t *testing.T) {
 		`{"action":"answer","text":"finished without browser input"}`,
 	}
 	responseIndex := 0
-	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeAutonomousCriticApproval(w, r) {
+			return
+		}
 		content := responses[responseIndex]
 		responseIndex++
 		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
@@ -348,7 +378,10 @@ func TestBackendAutonomousRunContinuesAfterMissingJob(t *testing.T) {
 		`{"action":"answer","text":"recovered"}`,
 	}
 	responseIndex := 0
-	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeAutonomousCriticApproval(w, r) {
+			return
+		}
 		content := responses[responseIndex]
 		responseIndex++
 		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
@@ -428,6 +461,52 @@ func TestFailedCommandDoesNotSatisfyExecutionRequirement(t *testing.T) {
 	}
 }
 
+func TestBackendAutonomousRunRetriesCommandAfterFailedExecution(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	responses := []string{
+		`{"action":"run_command","command":"sh -c 'exit 1'"}`,
+		`{"action":"answer","text":"could not complete"}`,
+		`{"action":"run_command","command":"echo recovered"}`,
+		`{"action":"answer","text":"completed after retry"}`,
+	}
+	responseIndex := 0
+	criticCalls := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(request.Messages[0].Content, "You are an independent critic") {
+			criticCalls++
+			writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: `{"approved":true,"feedback":"","evidenceEventIds":[]}`}})
+			return
+		}
+		content := responses[responseIndex]
+		responseIndex++
+		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "execute a check and report", defaultSystemPrompt, "default")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runAutonomousAgent(ctx, sess)
+
+	run := sess.autonomousSnapshot()
+	if run.Status != autonomousWaitingApproval || run.FinalAnswer != "completed after retry" || responseIndex != 4 || criticCalls != 1 {
+		t.Fatalf("failed command recovery did not complete: responses=%d critics=%d run=%+v", responseIndex, criticCalls, run)
+	}
+	if command, failed := latestAutonomousCommandFailure(run.Events); failed || command != "echo recovered" {
+		t.Fatalf("latest command failure state was not cleared: command=%q failed=%v", command, failed)
+	}
+}
+
 func TestAutonomousMessagesIncludeAllowedCommandNames(t *testing.T) {
 	sess := &webSession{ID: "session"}
 	sess.AutonomousRun = newAutonomousRun(sess.ID, "ping once", defaultSystemPrompt, "default")
@@ -435,8 +514,52 @@ func TestAutonomousMessagesIncludeAllowedCommandNames(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(messages[0].Content, "AVAILABLE COMMAND NAMES") || !strings.Contains(messages[0].Content, "ping") {
+	if !strings.Contains(messages[0].Content, "EXECUTION ENVIRONMENT") || !strings.Contains(messages[0].Content, "Commands installed and allowed") {
 		t.Fatalf("autonomous prompt omitted command allowlist: %q", messages[0].Content)
+	}
+}
+
+func TestAutonomousRunDetectsEnvironmentCapabilities(t *testing.T) {
+	run := newAutonomousRun("session", "inspect environment", defaultSystemPrompt, "default")
+	if run.OperatingSystem == "" || run.WorkingDirectory == "" {
+		t.Fatalf("execution environment was not captured: %+v", run)
+	}
+	if len(run.AvailableCommands)+len(run.UnavailableCommands) != len(allowedCommands) {
+		t.Fatalf("command capability inventory is incomplete: available=%d unavailable=%d allowlist=%d", len(run.AvailableCommands), len(run.UnavailableCommands), len(allowedCommands))
+	}
+}
+
+func TestAutonomousMessagesIncludeStructuredGoal(t *testing.T) {
+	sess := &webSession{ID: "session"}
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "inspect service", defaultSystemPrompt, "default")
+	sess.AutonomousRun.GoalSpec = normalizeAutonomousGoalSpec(AutonomousGoalSpec{
+		Objective:          "Inspect service health",
+		ExpectedOutput:     "A health report",
+		Constraints:        "Read-only commands",
+		CompletionCriteria: "Health and latency are reported",
+	})
+	messages, err := autonomousMessages(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{"OBJECTIVE:\nInspect service health", "EXPECTED OUTPUT:\nA health report", "CONSTRAINTS:\nRead-only commands", "COMPLETION CRITERIA:\nHealth and latency are reported"} {
+		if !strings.Contains(messages[0].Content, expected) {
+			t.Fatalf("structured goal omitted %q", expected)
+		}
+	}
+}
+
+func TestAutonomousContextSelectionUsesTokenBudget(t *testing.T) {
+	events := make([]AutonomousEvent, 10)
+	for index := range events {
+		events[index] = AutonomousEvent{Sequence: index + 1, Kind: "observation", Output: strings.Repeat("x", 80)}
+	}
+	selected := selectAutonomousContextEvents(events, 0, 70)
+	if len(selected) == 0 || len(selected) >= len(events) {
+		t.Fatalf("token budget did not compact context: selected=%d", len(selected))
+	}
+	if selected[len(selected)-1].Sequence != 10 {
+		t.Fatalf("newest event was not retained: %+v", selected)
 	}
 }
 
@@ -449,6 +572,28 @@ func TestAutonomousJobActionRequiresRunOwnedJob(t *testing.T) {
 	}
 }
 
+func TestAutonomousPlanLifecycle(t *testing.T) {
+	sess := &webSession{ID: "session"}
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "inspect two services", defaultSystemPrompt, "default")
+	if !executeAutonomousAction(context.Background(), sess, ToolResponse{Action: "create_plan", Steps: []string{"Inspect first", "Inspect second"}}) {
+		t.Fatal("create_plan stopped the run")
+	}
+	run := sess.autonomousSnapshot()
+	if len(run.Plan) != 2 || run.Plan[0].Status != "pending" {
+		t.Fatalf("plan was not created: %+v", run.Plan)
+	}
+	sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: "run_command", Success: true})
+	run = sess.autonomousSnapshot()
+	action := ToolResponse{Action: "complete_step", StepID: 1, EvidenceEventIDs: []int{2}}
+	if err := validateAutonomousActionState(sess, run, action); err != nil {
+		t.Fatal(err)
+	}
+	executeAutonomousAction(context.Background(), sess, action)
+	if step := sess.autonomousSnapshot().Plan[0]; step.Status != "completed" || len(step.EvidenceEventIDs) != 1 {
+		t.Fatalf("plan step was not completed with evidence: %+v", step)
+	}
+}
+
 func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{
@@ -457,7 +602,10 @@ func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
 		`{"action":"answer","text":"The measured output was measured."}`,
 	}
 	var requestCount int
-	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeAutonomousCriticApproval(w, r) {
+			return
+		}
 		response := responses[requestCount]
 		requestCount++
 		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: response}})
@@ -490,9 +638,57 @@ func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
 	}
 }
 
+func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var agentCalls, criticCalls int
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+			return
+		}
+		if strings.Contains(request.Messages[0].Content, "You are an independent critic") {
+			criticCalls++
+			approved := criticCalls > 1
+			feedback := ""
+			if !approved {
+				feedback = "The answer omits the requested conclusion."
+			}
+			content, _ := json.Marshal(AutonomousVerification{Approved: approved, Feedback: feedback})
+			writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: string(content)}})
+			return
+		}
+		agentCalls++
+		answer := "incomplete"
+		if agentCalls > 1 {
+			answer = "complete revised answer"
+		}
+		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: fmt.Sprintf(`{"action":"answer","text":%q}`, answer)}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "provide a conclusion", defaultSystemPrompt, "default")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runAutonomousAgent(ctx, sess)
+
+	run := sess.autonomousSnapshot()
+	if run.Status != autonomousWaitingApproval || run.FinalAnswer != "complete revised answer" || agentCalls != 2 || criticCalls != 2 {
+		t.Fatalf("critic revision flow failed: agentCalls=%d criticCalls=%d run=%+v", agentCalls, criticCalls, run)
+	}
+}
+
 func TestAutonomousLifecycleAPI(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeAutonomousCriticApproval(w, r) {
+			return
+		}
 		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: `{"action":"answer","text":"candidate"}`}})
 	}))
 	defer ollama.Close()
@@ -535,6 +731,54 @@ func TestAutonomousLifecycleAPI(t *testing.T) {
 	}
 	if run := webStore.ensure(started.SessionID).autonomousSnapshot(); run.Status != autonomousCompleted {
 		t.Fatalf("accepted run status = %s", run.Status)
+	}
+}
+
+func TestAutonomousClarificationLifecycle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	agentCalls := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if writeAutonomousCriticApproval(w, r) {
+			return
+		}
+		agentCalls++
+		content := `{"action":"request_clarification","text":"Which output format should I use?"}`
+		if agentCalls > 1 {
+			content = `{"action":"answer","text":"Used JSON as requested."}`
+		}
+		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	start := httptest.NewRecorder()
+	handleAutonomousStart(start, httptest.NewRequest(http.MethodPost, "/api/autonomous/start", bytes.NewBufferString(`{"goal":"format the result"}`)))
+	var started struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	waitForAutonomousStatus(t, started.SessionID, autonomousWaitingInput)
+
+	empty := httptest.NewRecorder()
+	handleAutonomousDecision(empty, httptest.NewRequest(http.MethodPost, "/api/autonomous/decision", bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"continue"}`, started.SessionID))))
+	if empty.Code != http.StatusBadRequest {
+		t.Fatalf("empty clarification status = %d, body = %s", empty.Code, empty.Body.String())
+	}
+
+	decision := httptest.NewRecorder()
+	handleAutonomousDecision(decision, httptest.NewRequest(http.MethodPost, "/api/autonomous/decision", bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"continue","feedback":"JSON"}`, started.SessionID))))
+	if decision.Code != http.StatusOK {
+		t.Fatalf("clarification status = %d, body = %s", decision.Code, decision.Body.String())
+	}
+	waitForAutonomousStatus(t, started.SessionID, autonomousWaitingApproval)
+	run := webStore.ensure(started.SessionID).autonomousSnapshot()
+	if run.FinalAnswer != "Used JSON as requested." || agentCalls != 2 {
+		t.Fatalf("clarification did not resume run: agentCalls=%d run=%+v", agentCalls, run)
 	}
 }
 

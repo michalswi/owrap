@@ -157,7 +157,7 @@ func (s *webSessionStore) load() error {
 		return nil
 	}
 	state.Session.ThinkingEnabled = false
-	runWasWaiting := state.Session.AutonomousRun != nil && state.Session.AutonomousRun.Status == autonomousWaitingApproval
+	runWasWaiting := state.Session.AutonomousRun != nil && (state.Session.AutonomousRun.Status == autonomousWaitingApproval || state.Session.AutonomousRun.Status == autonomousWaitingInput)
 	if state.Session.AutonomousRun != nil && state.Session.AutonomousRun.Status == autonomousRunning {
 		now := time.Now().UTC()
 		state.Session.AutonomousRun.Status = autonomousFailed
@@ -345,10 +345,13 @@ type ChatResponse struct {
 }
 
 type ToolResponse struct {
-	Action  string `json:"action"`            // "run_command", "answer", "update_findings", "run_command_bg", "check_job", "get_job", "cancel_job", "list_jobs"
-	Command string `json:"command,omitempty"` // when action == run_command or run_command_bg
-	Text    string `json:"text,omitempty"`    // when action == answer or update_findings
-	JobID   string `json:"jobId,omitempty"`   // for job-related actions
+	Action           string   `json:"action"`
+	Command          string   `json:"command,omitempty"`
+	Text             string   `json:"text,omitempty"`
+	JobID            string   `json:"jobId,omitempty"`
+	Steps            []string `json:"steps,omitempty"`
+	StepID           int      `json:"stepId,omitempty"`
+	EvidenceEventIDs []int    `json:"evidenceEventIds,omitempty"`
 }
 
 type webChatRequest struct {
