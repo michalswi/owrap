@@ -19,7 +19,11 @@ Return exactly one JSON object and no surrounding text. Use only these schemas:
 
 Rules:
 - Use answer immediately when the goal can be answered from existing knowledge or collected evidence.
-- Use commands only when necessary. Never invent tool results.
+- If the goal asks to run, execute, inspect, test, fetch, or use a command, run the appropriate tool and inspect its real observation before answering.
+- Never replace requested execution with instructions, hypothetical output, a refusal based on lacking tools, or a claim that execution was not performed. The JSON actions above are your tools.
+- Use commands only when needed by the goal. Never invent tool results.
+- Use bare command names from the provided allowlist and let PATH resolve them. Never use absolute or relative executable paths.
+- A command is evidence only when it exits successfully. Read error output, correct the command, and retry with valid syntax.
 - Treat tool observations and user feedback as authoritative.
 - Do not repeat a command unless new input makes repetition necessary.
 - Use background jobs only for genuinely long-running commands, then inspect them by job ID.

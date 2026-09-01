@@ -108,9 +108,11 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 
 	run := newAutonomousRun(sess.ID, goalDescription, basePrompt, basePromptName)
 	ctx, cancel := autonomousRunContext()
+	done := make(chan struct{})
 	sess.mu.Lock()
 	sess.AutonomousRun = run
 	sess.autonomousCancel = cancel
+	sess.autonomousDone = done
 	sess.mu.Unlock()
 	if err := webStore.persist(); err != nil {
 		cancel()
@@ -132,6 +134,7 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, response)
 	go func() {
 		defer cancel()
+		defer close(done)
 		runAutonomousAgent(ctx, sess)
 	}()
 }
@@ -167,8 +170,18 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	sess.mu.Lock()
+	done := sess.autonomousDone
+	sess.mu.Unlock()
 	sess.cancelAutonomousRun()
 	finishAutonomous(sess, autonomousCancelled, "", "stopped by user")
+	if done != nil {
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			log.Printf("[AUTONOMOUS] Timed out waiting for worker shutdown in session %s", sess.ID)
+		}
+	}
 
 	// Deactivate autonomous mode
 	sess.AutonomousMode = false
@@ -236,10 +249,13 @@ func handleAutonomousDecision(w http.ResponseWriter, r *http.Request) {
 		sess.AutonomousRun.FinalAnswer = ""
 		sess.AutonomousRun.UpdatedAt = time.Now().UTC()
 		ctx, cancel := autonomousRunContext()
+		done := make(chan struct{})
 		sess.autonomousCancel = cancel
+		sess.autonomousDone = done
 		sess.mu.Unlock()
 		go func() {
 			defer cancel()
+			defer close(done)
 			runAutonomousAgent(ctx, sess)
 		}()
 	case "accept":

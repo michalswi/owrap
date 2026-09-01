@@ -274,6 +274,7 @@ Autonomous state management includes:
 - Tool observations truncated to 32 KiB before entering model context.
 - Up to three consecutive protocol or model failures.
 - Strict single-object JSON decoding with unknown fields rejected.
+- A completion gate that requires an observation when the goal explicitly names an allowlisted command.
 - Per-run cancellation for foreground commands and background jobs.
 
 The server worker owns the loop. Closing or refreshing the browser does not stop progress; the UI reconstructs it from persisted status and events.

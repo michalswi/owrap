@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -40,6 +41,7 @@ type AutonomousEvent struct {
 	Text      string    `json:"text,omitempty"`
 	Command   string    `json:"command,omitempty"`
 	Output    string    `json:"output,omitempty"`
+	Success   bool      `json:"success,omitempty"`
 	Thinking  string    `json:"thinking,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -188,6 +190,23 @@ func runAutonomousAgent(ctx context.Context, sess *webSession) {
 			}
 			continue
 		}
+		if err := validateAutonomousActionState(sess, run, action); err != nil {
+			sess.appendAutonomousEvent(AutonomousEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
+			if !recordAutonomousFailure(sess, err.Error()) {
+				return
+			}
+			continue
+		}
+		if action.Action == "answer" {
+			if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
+				message := fmt.Sprintf("goal requires executing %q before answering; return run_command with that command", command)
+				sess.appendAutonomousEvent(AutonomousEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
+				if !recordAutonomousFailure(sess, message) {
+					return
+				}
+				continue
+			}
+		}
 		resetAutonomousFailures(sess)
 		sess.appendAutonomousEvent(AutonomousEvent{Kind: "action", Action: action.Action, Text: action.Text, Command: action.Command, Thinking: response.Thinking})
 		if err := webStore.persist(); err != nil {
@@ -214,7 +233,11 @@ func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
 	if err != nil {
 		return nil, err
 	}
+	prompt += "\n\nAVAILABLE COMMAND NAMES (use exactly as shown, without paths):\n" + strings.Join(allowedCommandsList(), ", ")
 	messages := []ChatMessage{{Role: "system", Content: prompt}}
+	if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
+		messages[0].Content += fmt.Sprintf("\n\nEXECUTION REQUIREMENT: The goal explicitly requires %q. You must return run_command using %q and inspect its real output before returning answer. A description, refusal, or hypothetical result is not completion.", command, command)
+	}
 	start := len(run.Events) - autonomousContextEvents
 	if start < 0 {
 		start = 0
@@ -235,11 +258,53 @@ func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
 		}
 	}
 	if len(messages) == 1 {
-		messages = append(messages, ChatMessage{Role: "user", Content: "Begin working on the goal. Answer directly if no tool is needed."})
+		instruction := "Begin working on the goal. Answer directly only if no tool is needed."
+		if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
+			instruction = fmt.Sprintf("Begin by executing the required %q command. Do not answer until you have inspected its output.", command)
+		}
+		messages = append(messages, ChatMessage{Role: "user", Content: instruction})
 	} else {
 		messages = append(messages, ChatMessage{Role: "user", Content: "Choose the next action. If the goal is complete, return answer."})
 	}
 	return messages, nil
+}
+
+func requiredGoalCommand(run *AutonomousRun) string {
+	for _, field := range autonomousGoalFields(run.Goal) {
+		if allowedCommands[field] {
+			return field
+		}
+	}
+	return ""
+}
+
+func autonomousGoalFields(goal string) []string {
+	return strings.FieldsFunc(strings.ToLower(goal), func(r rune) bool {
+		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' && r != '-'
+	})
+}
+
+func hasCommandObservation(events []AutonomousEvent, requiredCommand string) bool {
+	for _, event := range events {
+		if event.Kind != "observation" || event.Action != "run_command" || !event.Success {
+			continue
+		}
+		fields := strings.Fields(event.Command)
+		if len(fields) > 0 && fields[0] == requiredCommand {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAutonomousActionState(sess *webSession, run *AutonomousRun, action ToolResponse) error {
+	if action.Action == "check_job" || action.Action == "get_job" || action.Action == "cancel_job" {
+		job, ok := jobStore.get(action.JobID)
+		if !ok || job.SessionID != sess.ID || job.RunID != run.ID {
+			return fmt.Errorf("job %q was not created by this run; start a background job first and use its returned jobId", action.JobID)
+		}
+	}
+	return nil
 }
 
 func autonomousEventHistory(events []AutonomousEvent) string {
@@ -300,6 +365,12 @@ func validateAutonomousCommand(command string) error {
 		if len(fields) == 0 {
 			continue
 		}
+		if strings.Contains(fields[0], "/") {
+			commandName := filepath.Base(fields[0])
+			if allowedCommands[commandName] {
+				return fmt.Errorf("command %q must use the bare allowlisted name %q without a path", fields[0], commandName)
+			}
+		}
 		if !allowedCommands[fields[0]] {
 			return fmt.Errorf("command %q is not allowed", fields[0])
 		}
@@ -327,13 +398,13 @@ func executeAutonomousAction(ctx context.Context, sess *webSession, action ToolR
 		return true
 	case "run_command":
 		commandCtx, cancel := context.WithTimeout(ctx, autonomousCommandTimeout)
-		output := runAutonomousCommand(commandCtx, action.Command)
+		output, success := runAutonomousCommand(commandCtx, action.Command)
 		cancel()
 		sess.mu.Lock()
 		sess.CommandCount++
 		sess.Stats.recordCommand(action.Command)
 		sess.mu.Unlock()
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Command: action.Command, Output: truncateAutonomousText(output)})
+		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Command: action.Command, Output: truncateAutonomousText(output), Success: success})
 		sess.appendAgentMessage(ChatMessage{Role: "assistant", Content: fmt.Sprintf("[Running]: %s\n[Command output]:\n%s", action.Command, output)})
 		return true
 	case "run_command_bg":
@@ -385,7 +456,7 @@ func executeAutonomousAction(ctx context.Context, sess *webSession, action ToolR
 	return true
 }
 
-func runAutonomousCommand(ctx context.Context, command string) string {
+func runAutonomousCommand(ctx context.Context, command string) (string, bool) {
 	command = sanitizeCommand(command)
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	var stdout, stderr bytes.Buffer
@@ -402,9 +473,9 @@ func runAutonomousCommand(ctx context.Context, command string) string {
 		output += "\nError: " + err.Error()
 	}
 	if strings.TrimSpace(output) == "" {
-		return "(no output)"
+		output = "(no output)"
 	}
-	return output
+	return output, err == nil && ctx.Err() == nil
 }
 
 func recordAutonomousFailure(sess *webSession, message string) bool {

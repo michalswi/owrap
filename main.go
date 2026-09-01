@@ -55,6 +55,7 @@ type webSession struct {
 	AutonomousStart    int             // First message included in the current autonomous run
 	AutonomousRun      *AutonomousRun  `json:"autonomousRun,omitempty"`
 	autonomousCancel   context.CancelFunc
+	autonomousDone     chan struct{}
 }
 
 type webSessionStore struct {

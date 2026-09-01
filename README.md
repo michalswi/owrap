@@ -275,6 +275,7 @@ Because it's **beta version** it would require more work to improve the way how 
 - **Decision Recovery**: Refreshing the Web UI restores a pending Continue/End decision
 - **Durable Lifecycle**: Run status and sequenced events are persisted. A run interrupted by an OWRAP restart is marked failed, while a pending candidate answer remains available for review
 - **Protocol Recovery**: Invalid JSON or unsupported actions share one three-attempt retry counter. Recovery guidance allows either a direct `answer` or another supported tool action; after the third consecutive failure, OWRAP performs the same cleanup as **Stop autonomous**
+- **Execution Evidence**: When a goal explicitly names an allowlisted command, OWRAP rejects candidate answers until that command has produced a real observation
 - **Job Recovery**: Missing background job IDs and job-start failures are returned to the agent as context, and the autonomous loop continues with another step
 - **Run-Owned Jobs**: Stopping or terminating a run cancels its active background jobs
 - **Manual Control**: `/autostop` button available for manual interruption at any time

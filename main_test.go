@@ -405,6 +405,89 @@ func TestAutonomousCommandValidationRejectsNestedExecution(t *testing.T) {
 	if err := validateAutonomousCommand("echo hello | grep hello"); err != nil {
 		t.Fatalf("valid allowlisted pipeline rejected: %v", err)
 	}
+	err := validateAutonomousCommand("/bin/ping -c 5 google.com")
+	if err == nil || !strings.Contains(err.Error(), `bare allowlisted name "ping"`) {
+		t.Fatalf("path-qualified command returned unhelpful error: %v", err)
+	}
+}
+
+func TestFailedCommandDoesNotSatisfyExecutionRequirement(t *testing.T) {
+	events := []AutonomousEvent{{
+		Kind:    "observation",
+		Action:  "run_command",
+		Command: "ping invalid 5x",
+		Output:  "usage: ping",
+		Success: false,
+	}}
+	if hasCommandObservation(events, "ping") {
+		t.Fatal("failed command counted as successful execution evidence")
+	}
+	events[0].Success = true
+	if !hasCommandObservation(events, "ping") {
+		t.Fatal("successful command observation was not recognized")
+	}
+}
+
+func TestAutonomousMessagesIncludeAllowedCommandNames(t *testing.T) {
+	sess := &webSession{ID: "session"}
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "ping once", defaultSystemPrompt, "default")
+	messages, err := autonomousMessages(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(messages[0].Content, "AVAILABLE COMMAND NAMES") || !strings.Contains(messages[0].Content, "ping") {
+		t.Fatalf("autonomous prompt omitted command allowlist: %q", messages[0].Content)
+	}
+}
+
+func TestAutonomousJobActionRequiresRunOwnedJob(t *testing.T) {
+	run := newAutonomousRun("session", "inspect a job", defaultSystemPrompt, "default")
+	sess := &webSession{ID: "session"}
+	action := ToolResponse{Action: "check_job", JobID: "invented"}
+	if err := validateAutonomousActionState(sess, run, action); err == nil || !strings.Contains(err.Error(), "was not created by this run") {
+		t.Fatalf("invented job ID was not rejected: %v", err)
+	}
+}
+
+func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	responses := []string{
+		`{"action":"answer","text":"No command was performed."}`,
+		`{"action":"run_command","command":"echo measured"}`,
+		`{"action":"answer","text":"The measured output was measured."}`,
+	}
+	var requestCount int
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		response := responses[requestCount]
+		requestCount++
+		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: response}})
+	}))
+	defer ollama.Close()
+	previousURL := ollamaURL
+	ollamaURL = ollama.URL
+	defer func() { ollamaURL = previousURL }()
+
+	webStore = newWebSessionStore()
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "use echo to produce measured output", defaultSystemPrompt, "default")
+	ctx, cancel := autonomousRunContext()
+	defer cancel()
+	runAutonomousAgent(ctx, sess)
+
+	run := sess.autonomousSnapshot()
+	if run.Status != autonomousWaitingApproval {
+		t.Fatalf("status = %q, want %q (error: %s)", run.Status, autonomousWaitingApproval, run.Error)
+	}
+	if requestCount != 3 {
+		t.Fatalf("model requests = %d, want 3", requestCount)
+	}
+	if run.FinalAnswer != "The measured output was measured." {
+		t.Fatalf("final answer = %q", run.FinalAnswer)
+	}
+	if !hasCommandObservation(run.Events, "echo") {
+		t.Fatal("required command observation was not recorded")
+	}
 }
 
 func TestAutonomousLifecycleAPI(t *testing.T) {

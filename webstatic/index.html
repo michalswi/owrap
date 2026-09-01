@@ -1303,6 +1303,7 @@
     }
 
     async function send() {
+      if (isAutonomousActive) return;
       let text = msgEl.value.trim();
       if (!text && !(pendingFile && pendingFileEnabled)) return;
       
@@ -1325,7 +1326,7 @@
     }
 
     async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false) {
-      if (!text) return;
+      if (!text || isAutonomousActive) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
@@ -1477,8 +1478,8 @@
             autonomousGoalBanner.style.display = 'none';
             autonomousStartBtn.style.display = 'inline-flex';
             autonomousStopBtn.style.display = 'none';
-            enableAllButtons(); // Re-enable all buttons
             isAutonomousActive = false; // Reset flag
+            enableAllButtons(); // Re-enable all buttons
           } else if (data.autonomousMode && !data.autonomousContinue) {
             appendSeparator();
             appendLine('🏁 Autonomous loop complete (max iterations reached or goal achieved)', 'plain');
@@ -1512,10 +1513,19 @@
     }
 
     function setSending(active) {
-      sendBtn.disabled = active;
+      isRequestInProgress = active;
+      updateChatInputState();
       stopResponseBtn.style.display = active ? 'inline-flex' : 'none';
       sendSpinner.classList.toggle('visible', active);
       sendSpinner.setAttribute('aria-hidden', (!active).toString());
+    }
+
+    function updateChatInputState() {
+      const chatDisabled = isAutonomousActive;
+      msgEl.disabled = chatDisabled;
+      msgEl.setAttribute('aria-disabled', chatDisabled.toString());
+      sendBtn.disabled = chatDisabled || isRequestInProgress;
+      sendBtn.setAttribute('aria-disabled', sendBtn.disabled.toString());
     }
 
     function appendLine(text, kind = 'plain', skipMyPrompts = false) {
@@ -1840,8 +1850,8 @@
         autonomousStartBtn.style.display = 'none';
         autonomousStopBtn.style.display = 'inline-flex';
         promptEl.textContent = `sys-prompt: ${(data.run && data.run.basePromptName) || 'selected'} + autonomous`;
-        disableAllButtons(); // Disable all other buttons
         isAutonomousActive = true; // Set flag
+        disableAllButtons(); // Disable all other buttons
         stopRequested = false; // Reset stop flag
         
         // Show and update autonomous goal banner
@@ -1892,8 +1902,8 @@
         autonomousStartBtn.style.display = 'inline-flex';
         autonomousStopBtn.style.display = 'none';
         autonomousGoalBanner.style.display = 'none';
-        enableAllButtons(); // Re-enable all buttons
         isAutonomousActive = false; // Reset flag
+        enableAllButtons(); // Re-enable all buttons
         stopAutonomousStatusPolling();
         
         // Only show stop message immediately if no request was in progress
@@ -1929,6 +1939,7 @@
         const data = await response.json();
         if (decision === 'continue') {
           isAutonomousActive = true;
+          updateChatInputState();
           lastAutonomousStatus = '';
           startAutonomousStatusPolling();
         } else {
@@ -2021,6 +2032,7 @@
       document.querySelector('.file-upload-btn').disabled = true;
       toggleAttachedFileBtn.disabled = true;
       fileUpload.disabled = true;
+      updateChatInputState();
       
       // Apply disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
@@ -2047,6 +2059,7 @@
       document.querySelector('.file-upload-btn').disabled = false;
       toggleAttachedFileBtn.disabled = false;
       fileUpload.disabled = false;
+      updateChatInputState();
       
       // Remove disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
