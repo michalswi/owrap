@@ -45,15 +45,14 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
-	defer func() {
-		if err := webStore.persist(); err != nil {
-			log.Printf("warning: could not persist Web UI state: %v", err)
-		}
-	}()
-
-	// Save original prompt
-	sess.OriginalPrompt = systemPrompt
-	sess.OriginalPromptName = systemPromptName
+	if run := sess.autonomousSnapshot(); run != nil && (run.Status == autonomousRunning || run.Status == autonomousWaitingApproval) {
+		http.Error(w, "an autonomous run is already active", http.StatusConflict)
+		return
+	}
+	basePrompt := systemPrompt
+	basePromptName := systemPromptName
+	sess.OriginalPrompt = basePrompt
+	sess.OriginalPromptName = basePromptName
 
 	// Activate autonomous mode
 	sess.AutonomousMode = true
@@ -100,28 +99,41 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 		goalDescription += "\nYou can use standard command-line tools (cat, grep, jq, awk, etc.) to analyze this file."
 	}
 
-	// Add the autonomous protocol without discarding the selected prompt.
-	autonomousPrompt, err := composeAutonomousPrompt(sess.OriginalPrompt, goalDescription, "No previous attempts yet.")
+	// Validate prompt composition before launching the worker.
+	_, err := composeAutonomousPrompt(basePrompt, goalDescription, "No previous attempts yet.")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to load autonomous prompt: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	// Update system prompt
-	systemPrompt = autonomousPrompt
-	systemPromptName = sess.OriginalPromptName + " + autonomous"
+	run := newAutonomousRun(sess.ID, goalDescription, basePrompt, basePromptName)
+	ctx, cancel := autonomousRunContext()
+	sess.mu.Lock()
+	sess.AutonomousRun = run
+	sess.autonomousCancel = cancel
+	sess.mu.Unlock()
+	if err := webStore.persist(); err != nil {
+		cancel()
+		http.Error(w, fmt.Sprintf("failed to persist autonomous run: %v", err), http.StatusInternalServerError)
+		return
+	}
 
 	response := map[string]interface{}{
 		"sessionId": sess.ID,
 		"status":    "autonomous_mode_active",
 		"message":   fmt.Sprintf("Autonomous mode activated. Goal: %s", req.Goal),
 		"goal":      req.Goal,
+		"run":       run,
 	}
 	if filePath != "" {
 		response["filePath"] = filePath
 		response["fileName"] = req.File.Name
 	}
 	writeJSON(w, http.StatusOK, response)
+	go func() {
+		defer cancel()
+		runAutonomousAgent(ctx, sess)
+	}()
 }
 
 // handleAutonomousStop deactivates autonomous mode for a session
@@ -155,27 +167,8 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Restore original prompt
-	if sess.OriginalPrompt != "" {
-		systemPrompt = sess.OriginalPrompt
-		systemPromptName = sess.OriginalPromptName
-	} else {
-		// Fallback to default
-		systemPrompt = defaultSystemPrompt
-		systemPromptName = "default"
-	}
-
-	// Clean up temp file if exists
-	if sess.AttachedFilePath != "" {
-		tempDir, err := owrapAutonomousSessionDir(sess.ID)
-		if err != nil {
-			log.Printf("[AUTONOMOUS] Warning: failed to resolve storage dir: %v", err)
-		} else if err := os.RemoveAll(tempDir); err != nil {
-			log.Printf("[AUTONOMOUS] Warning: failed to clean up temp dir: %v", err)
-		} else {
-			log.Printf("[AUTONOMOUS] Cleaned up temp directory: %s", tempDir)
-		}
-	}
+	sess.cancelAutonomousRun()
+	finishAutonomous(sess, autonomousCancelled, "", "stopped by user")
 
 	// Deactivate autonomous mode
 	sess.AutonomousMode = false
@@ -189,7 +182,78 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 		"sessionId": sess.ID,
 		"status":    "autonomous_mode_stopped",
 		"message":   "Autonomous mode deactivated. System prompt restored.",
-		"prompt":    systemPromptName,
+		"prompt":    sess.OriginalPromptName,
+		"run":       sess.autonomousSnapshot(),
+	})
+}
+
+func handleAutonomousStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	sess := webStore.ensure(r.URL.Query().Get("sessionId"))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessionId": sess.ID,
+		"run":       sess.autonomousSnapshot(),
+		"messages":  sess.Messages,
+		"stats":     sess.Stats,
+	})
+}
+
+func handleAutonomousDecision(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		SessionID string `json:"sessionId"`
+		Decision  string `json:"decision"`
+		Feedback  string `json:"feedback,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	sess := webStore.ensure(req.SessionID)
+	run := sess.autonomousSnapshot()
+	if run == nil || run.Status != autonomousWaitingApproval {
+		http.Error(w, "no autonomous answer is awaiting approval", http.StatusConflict)
+		return
+	}
+
+	switch req.Decision {
+	case "continue":
+		feedback := strings.TrimSpace(req.Feedback)
+		if feedback == "" {
+			feedback = "The candidate answer is incomplete. Review the goal, address remaining gaps, and improve it."
+		}
+		sess.appendAutonomousEvent(AutonomousEvent{Kind: "feedback", Text: feedback})
+		sess.mu.Lock()
+		sess.AwaitingDecision = false
+		sess.AutonomousMode = true
+		sess.AutonomousRun.Status = autonomousRunning
+		sess.AutonomousRun.FinalAnswer = ""
+		sess.AutonomousRun.UpdatedAt = time.Now().UTC()
+		ctx, cancel := autonomousRunContext()
+		sess.autonomousCancel = cancel
+		sess.mu.Unlock()
+		go func() {
+			defer cancel()
+			runAutonomousAgent(ctx, sess)
+		}()
+	case "accept":
+		finishAutonomous(sess, autonomousCompleted, run.FinalAnswer, "")
+	default:
+		http.Error(w, "decision must be continue or accept", http.StatusBadRequest)
+		return
+	}
+	if err := webStore.persist(); err != nil {
+		log.Printf("warning: could not persist autonomous decision: %v", err)
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sessionId": sess.ID,
+		"run":       sess.autonomousSnapshot(),
 	})
 }
 

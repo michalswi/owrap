@@ -263,7 +263,8 @@ Because it's **beta version** it would require more work to improve the way how 
 - **Goal-Oriented**: Define a high-level objective (e.g., "analyze the network security of domain.com and create a detailed report")
 - **Selected Prompt Preserved**: Autonomous mode keeps the active default, predefined, or custom system prompt and appends its generic JSON action protocol
 - **Clean Run Context**: Each new autonomous run excludes earlier messages and resets command history, retries, and partial findings while keeping the transcript visible in the UI
-- **Continuous Operation**: Agent executes commands, analyzes results, and plans next steps automatically without user intervention
+- **Server-Owned Execution**: A backend worker executes, observes, and plans each step; the run continues when the browser is refreshed or closed
+- **Bounded Operation**: Runs stop after 30 iterations or 30 minutes; model calls and foreground commands each have two-minute deadlines
 - **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
 - **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
   - Files are saved to `~/.owrap/autonomous_files/<sessionId>/`
@@ -272,9 +273,10 @@ Because it's **beta version** it would require more work to improve the way how 
 - **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
 - **User-Controlled Completion**: Candidate answers pause the loop so you can continue working or accept the result and end the loop
 - **Decision Recovery**: Refreshing the Web UI restores a pending Continue/End decision
-- **Safe Startup**: Restarting OWRAP always disables autonomous mode and clears transient autonomous state and attachments
+- **Durable Lifecycle**: Run status and sequenced events are persisted. A run interrupted by an OWRAP restart is marked failed, while a pending candidate answer remains available for review
 - **Protocol Recovery**: Invalid JSON or unsupported actions share one three-attempt retry counter. Recovery guidance allows either a direct `answer` or another supported tool action; after the third consecutive failure, OWRAP performs the same cleanup as **Stop autonomous**
 - **Job Recovery**: Missing background job IDs and job-start failures are returned to the agent as context, and the autonomous loop continues with another step
+- **Run-Owned Jobs**: Stopping or terminating a run cancels its active background jobs
 - **Manual Control**: `/autostop` button available for manual interruption at any time
 
 **Notes:**

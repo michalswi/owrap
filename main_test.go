@@ -237,7 +237,7 @@ func TestComposeAutonomousPromptPreservesSelectedPrompt(t *testing.T) {
 	for _, required := range []string{
 		"You are a concise philosophy assistant.",
 		"Who is God? Short answer.",
-		`"action": "answer"`,
+		`"action":"answer"`,
 	} {
 		if !strings.Contains(prompt, required) {
 			t.Fatalf("composed prompt missing %q", required)
@@ -290,43 +290,22 @@ func TestAutonomousAnswerWaitsForUserDecision(t *testing.T) {
 	}
 }
 
-func TestAutonomousMissingJobContinuesLoop(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
-	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{
-			Role: "assistant", Content: `{"action":"check_job","jobId":"missing-job"}`,
-		}})
-	}))
-	defer ollama.Close()
-
-	previousURL, previousStore := ollamaURL, webStore
-	ollamaURL, webStore = ollama.URL, newWebSessionStore()
-	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
-
+func TestAutonomousChatRejectedWhileRunActive(t *testing.T) {
 	sess := webStore.ensure("")
 	sess.AutonomousMode = true
 	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"next step"}`, sess.ID))
 	response := httptest.NewRecorder()
 	handleWebChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", body))
-
-	var payload webChatResponse
-	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-		t.Fatal(err)
-	}
-	if response.Code != http.StatusOK || payload.Action != "error" || !payload.AutonomousMode || !payload.AutonomousContinue {
-		t.Fatalf("missing job stalled autonomous loop: status=%d payload=%+v", response.Code, payload)
-	}
-	if len(sess.Messages) < 2 || sess.Messages[len(sess.Messages)-1].Content != "Job not found: missing-job" {
-		t.Fatalf("missing-job feedback not retained in context: %+v", sess.Messages)
+	if response.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusConflict)
 	}
 }
 
-func TestAutonomousMixedProtocolFailuresCountTowardStop(t *testing.T) {
+func TestBackendAutonomousRunExecutesUntilAnswer(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{
-		"not json",
-		`{"action":"check_file","url":"https://example.com"}`,
-		"still not json",
+		`{"action":"run_command","command":"echo worker-owned"}`,
+		`{"action":"answer","text":"finished without browser input"}`,
 	}
 	responseIndex := 0
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -342,21 +321,196 @@ func TestAutonomousMixedProtocolFailuresCountTowardStop(t *testing.T) {
 
 	sess := webStore.ensure("")
 	sess.AutonomousMode = true
-	for attempt := 1; attempt <= 3; attempt++ {
-		body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"retry"}`, sess.ID))
-		response := httptest.NewRecorder()
-		handleWebChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", body))
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "run a command and answer", "You are concise.", "test")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runAutonomousAgent(ctx, sess)
 
-		var payload webChatResponse
-		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
-			t.Fatal(err)
+	run := sess.autonomousSnapshot()
+	if responseIndex != 2 || run.Status != autonomousWaitingApproval || run.FinalAnswer != "finished without browser input" {
+		t.Fatalf("backend run did not reach answer: calls=%d run=%+v", responseIndex, run)
+	}
+	foundOutput := false
+	for _, event := range run.Events {
+		if event.Kind == "observation" && strings.Contains(event.Output, "worker-owned") {
+			foundOutput = true
 		}
-		if attempt < 3 {
-			if payload.AutonomousStop || sess.RetryCount != attempt {
-				t.Fatalf("attempt %d retry state = %d, payload=%+v", attempt, sess.RetryCount, payload)
-			}
-		} else if !payload.AutonomousStop {
-			t.Fatalf("third protocol failure did not request stop: %+v", payload)
+	}
+	if !foundOutput {
+		t.Fatalf("command observation missing from event log: %+v", run.Events)
+	}
+}
+
+func TestBackendAutonomousRunContinuesAfterMissingJob(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	responses := []string{
+		`{"action":"check_job","jobId":"missing-job"}`,
+		`{"action":"answer","text":"recovered"}`,
+	}
+	responseIndex := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		content := responses[responseIndex]
+		responseIndex++
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "recover", "You are concise.", "test")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runAutonomousAgent(ctx, sess)
+	if run := sess.autonomousSnapshot(); responseIndex != 2 || run.Status != autonomousWaitingApproval || run.FinalAnswer != "recovered" {
+		t.Fatalf("missing job stopped backend run: calls=%d run=%+v", responseIndex, run)
+	}
+}
+
+func TestBackendAutonomousRunStopsAfterProtocolFailures(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	responses := []string{"not json", `{"action":"unknown"}`, "still not json"}
+	responseIndex := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		content := responses[responseIndex]
+		responseIndex++
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "fail safely", "You are concise.", "test")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runAutonomousAgent(ctx, sess)
+	if run := sess.autonomousSnapshot(); responseIndex != 3 || run.Status != autonomousFailed || run.ConsecutiveErrors != 3 {
+		t.Fatalf("protocol failures were not bounded: calls=%d run=%+v", responseIndex, run)
+	}
+}
+
+func TestAutonomousCommandValidationRejectsNestedExecution(t *testing.T) {
+	for _, command := range []string{"echo $(touch hidden)", "echo `touch hidden`", "echo ok; rm file"} {
+		if err := validateAutonomousCommand(command); err == nil {
+			t.Fatalf("command %q bypassed autonomous allowlist", command)
+		}
+	}
+	if err := validateAutonomousCommand("echo hello | grep hello"); err != nil {
+		t.Fatalf("valid allowlisted pipeline rejected: %v", err)
+	}
+}
+
+func TestAutonomousLifecycleAPI(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: `{"action":"answer","text":"candidate"}`}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	start := httptest.NewRecorder()
+	handleAutonomousStart(start, httptest.NewRequest(http.MethodPost, "/api/autonomous/start", bytes.NewBufferString(`{"goal":"answer independently"}`)))
+	if start.Code != http.StatusOK {
+		t.Fatalf("start status = %d, body = %s", start.Code, start.Body.String())
+	}
+	var started struct {
+		SessionID string         `json:"sessionId"`
+		Run       *AutonomousRun `json:"run"`
+	}
+	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	waitForAutonomousStatus(t, started.SessionID, autonomousWaitingApproval)
+
+	status := httptest.NewRecorder()
+	handleAutonomousStatus(status, httptest.NewRequest(http.MethodGet, "/api/autonomous/status?sessionId="+started.SessionID, nil))
+	var statusPayload struct {
+		Run *AutonomousRun `json:"run"`
+	}
+	if err := json.Unmarshal(status.Body.Bytes(), &statusPayload); err != nil {
+		t.Fatal(err)
+	}
+	if statusPayload.Run == nil || statusPayload.Run.FinalAnswer != "candidate" || len(statusPayload.Run.Events) == 0 {
+		t.Fatalf("status omitted run progress: %+v", statusPayload.Run)
+	}
+
+	decision := httptest.NewRecorder()
+	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"accept"}`, started.SessionID))
+	handleAutonomousDecision(decision, httptest.NewRequest(http.MethodPost, "/api/autonomous/decision", body))
+	if decision.Code != http.StatusOK {
+		t.Fatalf("decision status = %d, body = %s", decision.Code, decision.Body.String())
+	}
+	if run := webStore.ensure(started.SessionID).autonomousSnapshot(); run.Status != autonomousCompleted {
+		t.Fatalf("accepted run status = %s", run.Status)
+	}
+}
+
+func TestAutonomousStopCancelsModelRequest(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		close(requestStarted)
+		<-releaseRequest
+	}))
+	defer func() {
+		close(releaseRequest)
+		ollama.Close()
+	}()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+
+	start := httptest.NewRecorder()
+	handleAutonomousStart(start, httptest.NewRequest(http.MethodPost, "/api/autonomous/start", bytes.NewBufferString(`{"goal":"wait"}`)))
+	var started struct {
+		SessionID string `json:"sessionId"`
+	}
+	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-requestStarted:
+	case <-time.After(time.Second):
+		t.Fatal("backend worker did not start model request")
+	}
+
+	stop := httptest.NewRecorder()
+	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q}`, started.SessionID))
+	handleAutonomousStop(stop, httptest.NewRequest(http.MethodPost, "/api/autonomous/stop", body))
+	if stop.Code != http.StatusOK {
+		t.Fatalf("stop status = %d, body = %s", stop.Code, stop.Body.String())
+	}
+	if run := webStore.ensure(started.SessionID).autonomousSnapshot(); run.Status != autonomousCancelled {
+		t.Fatalf("stopped run status = %s", run.Status)
+	}
+}
+
+func waitForAutonomousStatus(t *testing.T, sessionID string, want AutonomousRunStatus) {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(5 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if run := webStore.ensure(sessionID).autonomousSnapshot(); run != nil && run.Status == want {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("autonomous run did not reach %s", want)
+		case <-ticker.C:
 		}
 	}
 }

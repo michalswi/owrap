@@ -34,6 +34,7 @@ type ChatMessage struct {
 var webStatic embed.FS
 
 type webSession struct {
+	mu                 sync.Mutex
 	ID                 string
 	Messages           []ChatMessage
 	CreatedAt          time.Time
@@ -52,12 +53,15 @@ type webSession struct {
 	ThinkingEnabled    bool            // Per-session Ollama thinking mode
 	AwaitingDecision   bool            // Candidate autonomous answer awaits user approval
 	AutonomousStart    int             // First message included in the current autonomous run
+	AutonomousRun      *AutonomousRun  `json:"autonomousRun,omitempty"`
+	autonomousCancel   context.CancelFunc
 }
 
 type webSessionStore struct {
-	mu       sync.Mutex
-	sessions map[string]*webSession
-	activeID string
+	mu        sync.Mutex
+	persistMu sync.Mutex
+	sessions  map[string]*webSession
+	activeID  string
 }
 
 type persistedWebState struct {
@@ -152,16 +156,26 @@ func (s *webSessionStore) load() error {
 		return nil
 	}
 	state.Session.ThinkingEnabled = false
-	if state.Session.AttachedFilePath != "" {
+	runWasWaiting := state.Session.AutonomousRun != nil && state.Session.AutonomousRun.Status == autonomousWaitingApproval
+	if state.Session.AutonomousRun != nil && state.Session.AutonomousRun.Status == autonomousRunning {
+		now := time.Now().UTC()
+		state.Session.AutonomousRun.Status = autonomousFailed
+		state.Session.AutonomousRun.Error = "run interrupted by application restart"
+		state.Session.AutonomousRun.UpdatedAt = now
+		state.Session.AutonomousRun.CompletedAt = now
+	}
+	if state.Session.AttachedFilePath != "" && !runWasWaiting {
 		if tempDir, err := owrapAutonomousSessionDir(state.Session.ID); err != nil {
 			log.Printf("warning: could not resolve stale autonomous directory: %v", err)
 		} else if err := os.RemoveAll(tempDir); err != nil {
 			log.Printf("warning: could not remove stale autonomous directory: %v", err)
 		}
 	}
-	state.Session.AutonomousMode = false
-	state.Session.AutonomousGoal = ""
-	state.Session.AwaitingDecision = false
+	state.Session.AutonomousMode = runWasWaiting
+	state.Session.AwaitingDecision = runWasWaiting
+	if !runWasWaiting {
+		state.Session.AutonomousGoal = ""
+	}
 	state.Session.AutonomousStart = 0
 	state.Session.OriginalPrompt = ""
 	state.Session.OriginalPromptName = ""
@@ -169,8 +183,10 @@ func (s *webSessionStore) load() error {
 	state.Session.CommandCount = 0
 	state.Session.PartialFindings = ""
 	state.Session.LastCommands = nil
-	state.Session.AttachedFile = nil
-	state.Session.AttachedFilePath = ""
+	if !runWasWaiting {
+		state.Session.AttachedFile = nil
+		state.Session.AttachedFilePath = ""
+	}
 	state.Session.Stats.updateContext(systemPrompt, state.Session.Messages)
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -180,13 +196,17 @@ func (s *webSessionStore) load() error {
 }
 
 func (s *webSessionStore) persist() error {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 	s.mu.Lock()
 	sess, ok := s.sessions[s.activeID]
 	if !ok {
 		s.mu.Unlock()
 		return nil
 	}
+	sess.mu.Lock()
 	data, err := json.MarshalIndent(persistedWebState{Session: sess}, "", "  ")
+	sess.mu.Unlock()
 	s.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("failed to encode web state: %w", err)
@@ -221,6 +241,8 @@ type BackgroundJob struct {
 	EndTime   time.Time
 	Cmd       *exec.Cmd
 	SessionID string
+	RunID     string
+	Done      chan struct{} `json:"-"`
 }
 
 type JobStore struct {
@@ -249,6 +271,7 @@ func (s *JobStore) create(sessionID, command string) *BackgroundJob {
 		Command:   command,
 		Status:    "running",
 		StartTime: time.Now(),
+		Done:      make(chan struct{}),
 	}
 	s.jobs[id] = job
 	return job
@@ -270,6 +293,28 @@ func (s *JobStore) update(job *BackgroundJob) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.jobs[job.ID] = job
+}
+
+func (s *JobStore) cancelRun(runID string) {
+	s.mu.RLock()
+	var jobs []*BackgroundJob
+	for _, job := range s.jobs {
+		if job.RunID == runID && job.Status == "running" {
+			jobs = append(jobs, job)
+		}
+	}
+	s.mu.RUnlock()
+	for _, job := range jobs {
+		if job.Cmd != nil && job.Cmd.Process != nil {
+			_ = job.Cmd.Process.Kill()
+		}
+		if job.Done != nil {
+			select {
+			case <-job.Done:
+			case <-time.After(5 * time.Second):
+			}
+		}
+	}
 }
 
 var jobStore = newJobStore()
@@ -583,6 +628,7 @@ func executeBackgroundCommand(sessionID, command string) (*BackgroundJob, error)
 
 	// Run in goroutine with timeout
 	go func() {
+		defer close(job.Done)
 		const MaxJobDuration = 1 * time.Hour
 		done := make(chan error, 1)
 
@@ -911,6 +957,8 @@ func startWebUI(bindAddr string) error {
 	mux.HandleFunc("/api/command", handleWebCommand)
 	mux.HandleFunc("/api/autonomous/start", handleAutonomousStart)
 	mux.HandleFunc("/api/autonomous/stop", handleAutonomousStop)
+	mux.HandleFunc("/api/autonomous/status", handleAutonomousStatus)
+	mux.HandleFunc("/api/autonomous/decision", handleAutonomousDecision)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/ollama/status", handleOllamaStatus)
 
@@ -1129,8 +1177,9 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
-	if req.ResumeAutonomous && sess.AwaitingDecision {
-		sess.AwaitingDecision = false
+	if sess.AutonomousMode {
+		http.Error(w, "autonomous run active; use the autonomous status and decision APIs", http.StatusConflict)
+		return
 	}
 	defer func() {
 		if err := webStore.persist(); err != nil {
@@ -1360,16 +1409,6 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sess.appendMessage("user", req.Message)
-
-	// Update autonomous prompt if in autonomous mode
-	if sess.AutonomousMode {
-		history := buildIterationHistory(sess)
-		if prompt, promptErr := composeAutonomousPrompt(sess.OriginalPrompt, sess.AutonomousGoal, history); promptErr == nil {
-			systemPrompt = prompt
-		} else {
-			log.Printf("warning: could not update autonomous prompt: %v", promptErr)
-		}
-	}
 
 	contextMessages := sess.modelMessages()
 	messages := make([]ChatMessage, 0, len(contextMessages)+1)
