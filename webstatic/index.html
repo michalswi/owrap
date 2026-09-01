@@ -284,6 +284,7 @@
     #autonomousStop { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #ff453a !important; border-color: #ff453a; }
     .autonomous-decision { margin: 10px 0; padding: 10px; background: rgba(10,132,255,0.08); border: 1px solid rgba(10,132,255,0.28); border-radius: 6px; white-space: normal; }
     .autonomous-decision-title { margin-bottom: 8px; color: var(--terminal-text); font-size: 12px; line-height: 1.5; }
+    .autonomous-decision textarea { width: 100%; min-height: 72px; margin: 0 0 8px; padding: 8px; resize: vertical; color: var(--terminal-text); background: var(--terminal-bg); border: 1px solid var(--border-color); border-radius: 4px; font: inherit; line-height: 1.4; box-sizing: border-box; }
     .autonomous-decision-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
     .autonomous-decision-actions button { min-height: 26px; padding: 4px 10px; font-size: 10px; }
     .autonomous-decision .continue-work { color: #fff; background: #28a745 !important; border-color: #28a745; }
@@ -778,6 +779,9 @@
     let stopRequested = false; // Track if user clicked /autostop
     let showStopMessageAfterResponse = false; // Track if we need to show stop message after response displays
     let restoredPromptName = ''; // Store the restored prompt name for display after response
+    let autonomousStatusTimer = null;
+    let lastAutonomousEventSequence = 0;
+    let lastAutonomousStatus = '';
     let thinkingEnabled = false;
 
     statsHeader.addEventListener('click', () => {
@@ -1057,6 +1061,7 @@
             appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
             appendAutonomousDecision();
           }
+          startAutonomousStatusPolling();
         }
         restoringState = false;
         saveState();
@@ -1299,6 +1304,7 @@
     }
 
     async function send() {
+      if (isAutonomousActive) return;
       let text = msgEl.value.trim();
       if (!text && !(pendingFile && pendingFileEnabled)) return;
       
@@ -1321,7 +1327,7 @@
     }
 
     async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false) {
-      if (!text) return;
+      if (!text || isAutonomousActive) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
@@ -1461,30 +1467,7 @@
             renderStats(data.stats);
           }
           
-          // Auto-continue autonomous loop
-          if (isAutonomousActive && data.autonomousStop) {
-            setTimeout(() => stopAutonomousMode('stalled'), 0);
-          } else if (data.autonomousContinue && !stopRequested) {
-            appendSeparator();
-            if (data.action === 'error') {
-              // Error message already includes retry count from backend
-              appendLine(data.assistantText, 'error');
-              setTimeout(() => {
-                sendText('retry', false, null, true); // skipMyPrompts=true - Trigger retry with error feedback already in messages
-              }, 1500);
-            } else {
-              // Show different message based on goal review cycle
-              const userMessage = lastUserMessage.toLowerCase();
-              if (userMessage.includes('goal review') || userMessage.includes('🎯')) {
-                appendLine('🎯 Goal review in progress...', 'plain');
-              } else {
-                appendLine('🔄 Continuing autonomous loop...', 'plain');
-              }
-              setTimeout(() => {
-                sendText('next step', false, null, true); // skipMyPrompts=true
-              }, 1500);
-            }
-          } else if (isAutonomousActive && data.autonomousDecision) {
+          if (isAutonomousActive && data.autonomousDecision) {
             appendSeparator();
             appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
             appendAutonomousDecision();
@@ -1496,8 +1479,8 @@
             autonomousGoalBanner.style.display = 'none';
             autonomousStartBtn.style.display = 'inline-flex';
             autonomousStopBtn.style.display = 'none';
-            enableAllButtons(); // Re-enable all buttons
             isAutonomousActive = false; // Reset flag
+            enableAllButtons(); // Re-enable all buttons
           } else if (data.autonomousMode && !data.autonomousContinue) {
             appendSeparator();
             appendLine('🏁 Autonomous loop complete (max iterations reached or goal achieved)', 'plain');
@@ -1531,10 +1514,19 @@
     }
 
     function setSending(active) {
-      sendBtn.disabled = active;
+      isRequestInProgress = active;
+      updateChatInputState();
       stopResponseBtn.style.display = active ? 'inline-flex' : 'none';
       sendSpinner.classList.toggle('visible', active);
       sendSpinner.setAttribute('aria-hidden', (!active).toString());
+    }
+
+    function updateChatInputState() {
+      const chatDisabled = isAutonomousActive;
+      msgEl.disabled = chatDisabled;
+      msgEl.setAttribute('aria-disabled', chatDisabled.toString());
+      sendBtn.disabled = chatDisabled || isRequestInProgress;
+      sendBtn.setAttribute('aria-disabled', sendBtn.disabled.toString());
     }
 
     function appendLine(text, kind = 'plain', skipMyPrompts = false) {
@@ -1571,28 +1563,41 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    function appendAutonomousDecision() {
+    function appendAutonomousDecision(mode = 'approval', question = '') {
       logEl.querySelector('.autonomous-decision')?.remove();
+      const needsClarification = mode === 'clarification';
+      const title = needsClarification
+        ? question || 'The agent needs clarification before it can continue.'
+        : 'Review the candidate answer, then choose what the agent should do next.';
       logEl.insertAdjacentHTML('beforeend', `
         <div class="autonomous-decision">
-          <div class="autonomous-decision-title">Review the candidate answer, then choose what the agent should do next.</div>
+          <div class="autonomous-decision-title">${escapeHtml(title)}</div>
+          <textarea aria-label="${needsClarification ? 'Clarification' : 'Revision feedback'}" placeholder="${needsClarification ? 'Enter the information the agent needs' : 'Optional feedback for another attempt'}"></textarea>
           <div class="autonomous-decision-actions">
-            <button class="continue-work" type="button">Continue working</button>
-            <button class="end-loop" type="button">End loop</button>
+            <button class="continue-work" type="button">${needsClarification ? 'Submit' : 'Continue working'}</button>
+            ${needsClarification ? '' : '<button class="end-loop" type="button">End loop</button>'}
           </div>
         </div>`);
 
       const decision = logEl.querySelector('.autonomous-decision');
-      decision.querySelector('.continue-work').addEventListener('click', () => {
+      const feedback = decision.querySelector('textarea');
+      decision.querySelector('.continue-work').addEventListener('click', async () => {
+        const value = feedback.value.trim();
+        if (needsClarification && !value) {
+          feedback.focus();
+          return;
+        }
+        const submitted = await submitAutonomousDecision('continue', value);
+        if (!submitted) return;
         decision.remove();
-        appendLine('Continuing autonomous work...', 'plain');
-        sendText('The candidate answer is not satisfactory yet. Continue working on the goal, address remaining gaps, and provide an improved answer.', false, null, true, true);
+        appendLine(needsClarification ? 'Clarification submitted.' : 'Continuing autonomous work...', 'plain');
       });
-      decision.querySelector('.end-loop').addEventListener('click', async () => {
-        decision.remove();
-        await stopAutonomousMode('accepted');
+      decision.querySelector('.end-loop')?.addEventListener('click', async () => {
+        const submitted = await submitAutonomousDecision('accept');
+        if (submitted) decision.remove();
       });
       logEl.scrollTop = logEl.scrollHeight;
+      if (needsClarification) feedback.focus();
     }
 
     function setThinkingState(enabled) {
@@ -1728,6 +1733,21 @@
           <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">Goal:</label>
           <textarea id="autoGoalInput" placeholder="Example: Check the weather for Wrocław on the website wttr.in and create a report." style="min-height: 120px; font-size: 13px;"></textarea>
         </div>
+
+        <div style="margin-top: 12px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">Expected output:</label>
+          <input id="autoExpectedOutput" type="text" placeholder="Example: A short report with latency and packet-loss statistics">
+        </div>
+
+        <div style="margin-top: 12px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">Completion criteria:</label>
+          <input id="autoCompletionCriteria" type="text" placeholder="Example: Requested checks completed and conclusions supported by output">
+        </div>
+
+        <div style="margin-top: 12px;">
+          <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">Constraints (optional):</label>
+          <input id="autoConstraints" type="text" placeholder="Example: Read-only commands; finish within five minutes">
+        </div>
         
         <div style="margin-top: 16px;">
           <label style="display:block; margin-bottom:6px; font-weight:700; color:var(--accent-2);">📎 Attach file (optional):</label>
@@ -1740,7 +1760,7 @@
         </div>
         
         <div style="margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; font-size: 12px; color: var(--muted);">
-          ⚠️ <strong>Autonomous Mode:</strong> Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
+          ⚠️ <strong>Autonomous Mode:</strong> Starting resets the system prompt to <strong>default</strong>. Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
         </div>
         
         <div style="margin-top: 16px; display: flex; gap: 10px;">
@@ -1752,6 +1772,9 @@
       showModal('🤖 Start Autonomous Mode', bodyHtml);
       
       const goalInput = document.getElementById('autoGoalInput');
+      const expectedOutputInput = document.getElementById('autoExpectedOutput');
+      const completionCriteriaInput = document.getElementById('autoCompletionCriteria');
+      const constraintsInput = document.getElementById('autoConstraints');
       const confirmBtn = document.getElementById('startAutonomousConfirm');
       const cancelBtn = document.getElementById('startAutonomousCancel');
       const fileUploadBtn = document.getElementById('autoFileUploadBtn');
@@ -1802,7 +1825,11 @@
         }
         
         closeModal();
-        await startAutonomousMode(goal, autonomousFile);
+        await startAutonomousMode(goal, autonomousFile, {
+          expectedOutput: expectedOutputInput.value.trim(),
+          completionCriteria: completionCriteriaInput.value.trim(),
+          constraints: constraintsInput.value.trim()
+        });
       };
       
       confirmBtn.addEventListener('click', doStart);
@@ -1816,9 +1843,9 @@
       });
     }
 
-    async function startAutonomousMode(goal, file = null) {
+    async function startAutonomousMode(goal, file = null, goalSpec = {}) {
       try {
-        const requestBody = { sessionId, goal };
+        const requestBody = { sessionId, goal, ...goalSpec };
         
         // Include file if provided
         if (file) {
@@ -1858,9 +1885,9 @@
         // Update UI
         autonomousStartBtn.style.display = 'none';
         autonomousStopBtn.style.display = 'inline-flex';
-        promptEl.textContent = 'sys-prompt: autonomous_agent.txt';
-        disableAllButtons(); // Disable all other buttons
+        promptEl.textContent = `sys-prompt: ${(data.run && data.run.basePromptName) || 'selected'} + autonomous`;
         isAutonomousActive = true; // Set flag
+        disableAllButtons(); // Disable all other buttons
         stopRequested = false; // Reset stop flag
         
         // Show and update autonomous goal banner
@@ -1869,6 +1896,7 @@
         
         appendSeparator();
         appendLine('🤖 Autonomous mode ACTIVATED', 'assistant');
+        appendLine('System prompt reset to: default', 'assistant');
         appendLine(`Goal: ${goal}`, 'assistant');
         if (attachedFilePath) {
           appendLine(`📎 File available: ${attachedFileName} at ${attachedFilePath}`, 'assistant');
@@ -1878,17 +1906,9 @@
         appendSeparator();
         saveState();
         
-        // Automatically start the first iteration
-        setTimeout(() => {
-          let firstMessage = 'start working on the goal';
-          
-          // If file was attached, inform agent of the file path
-          if (attachedFilePath) {
-            firstMessage = `start working on the goal. The file "${attachedFileName}" is available at: ${attachedFilePath}. Use it as needed.`;
-          }
-          
-          sendText(firstMessage, false, null, true); // skipMyPrompts=true
-        }, 1000);
+        lastAutonomousEventSequence = 0;
+        lastAutonomousStatus = '';
+        startAutonomousStatusPolling();
         
       } catch (err) {
         appendLine(`❌ Error starting autonomous mode: ${err.message}`, 'error');
@@ -1897,22 +1917,7 @@
 
     async function stopAutonomousMode(reason = 'manual') {
       try {
-        // Set flag to prevent auto-continue from triggering
         stopRequested = true;
-        
-        // Show immediate feedback if request is in progress
-        if (isRequestInProgress) {
-          appendSeparator();
-          appendLine('⏳ Stopping autonomous mode... (waiting for current request to complete)', 'plain');
-          showStopMessageAfterResponse = true; // Show stop message after request completes
-        }
-        
-        // Wait for any pending request to complete
-        let waitCount = 0;
-        while (isRequestInProgress && waitCount < 100) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          waitCount++;
-        }
         
         const res = await fetch('/api/autonomous/stop', {
           method: 'POST',
@@ -1934,8 +1939,9 @@
         autonomousStartBtn.style.display = 'inline-flex';
         autonomousStopBtn.style.display = 'none';
         autonomousGoalBanner.style.display = 'none';
-        enableAllButtons(); // Re-enable all buttons
         isAutonomousActive = false; // Reset flag
+        enableAllButtons(); // Re-enable all buttons
+        stopAutonomousStatusPolling();
         
         // Only show stop message immediately if no request was in progress
         if (!showStopMessageAfterResponse) {
@@ -1959,6 +1965,107 @@
       }
     }
 
+    async function submitAutonomousDecision(decision, feedback = '') {
+      try {
+        const response = await fetch('/api/autonomous/decision', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, decision, feedback })
+        });
+        if (!response.ok) throw new Error(`decision failed: ${response.status}`);
+        const data = await response.json();
+        if (decision === 'continue') {
+          isAutonomousActive = true;
+          updateChatInputState();
+          lastAutonomousStatus = '';
+          startAutonomousStatusPolling();
+        } else {
+          completeAutonomousUI('Answer accepted. Autonomous run completed.');
+        }
+        return data;
+      } catch (error) {
+        appendLine(`Autonomous decision failed: ${error.message}`, 'error');
+        return null;
+      }
+    }
+
+    function startAutonomousStatusPolling() {
+      stopAutonomousStatusPolling();
+      const poll = async () => {
+        try {
+          const response = await fetch(`/api/autonomous/status?sessionId=${encodeURIComponent(sessionId)}`);
+          if (!response.ok) throw new Error(`status ${response.status}`);
+          const data = await response.json();
+          if (data.stats) renderStats(data.stats);
+          renderAutonomousRun(data.run);
+        } catch (error) {
+          console.warn('Autonomous status polling failed:', error);
+        }
+        if (isAutonomousActive) autonomousStatusTimer = setTimeout(poll, 1000);
+      };
+      poll();
+    }
+
+    function stopAutonomousStatusPolling() {
+      if (autonomousStatusTimer) clearTimeout(autonomousStatusTimer);
+      autonomousStatusTimer = null;
+    }
+
+    function renderAutonomousRun(run) {
+      if (!run) return;
+      for (const event of run.events || []) {
+        if (event.sequence <= lastAutonomousEventSequence) continue;
+        lastAutonomousEventSequence = event.sequence;
+        if (event.kind === 'action' && event.action === 'run_command') {
+          appendLine(`Assistant [Running]: ${event.command}`, 'assistant');
+        } else if (event.kind === 'action' && event.action === 'answer') {
+          appendThinking(event.thinking);
+          appendLine(`Assistant: ${event.text}`, 'assistant');
+        } else if (event.kind === 'observation') {
+          if (event.text) appendLine(event.text, 'plain');
+          if (event.output) appendLine(event.output, 'command');
+        } else if (event.kind === 'plan') {
+          appendLine(event.text || 'Autonomous plan updated.', 'plain');
+        } else if (event.kind === 'verification') {
+          appendLine(`Revision required: ${event.text}`, 'plain');
+        } else if (event.kind === 'clarification') {
+          appendLine(`Assistant: ${event.text}`, 'assistant');
+        } else if (event.kind === 'feedback') {
+          appendLine(`User: ${event.text}`, 'user');
+        } else if (event.kind === 'error' || event.kind === 'invalid_action') {
+          appendLine(event.text || 'Autonomous action failed.', 'error');
+        }
+      }
+
+      if (run.status === lastAutonomousStatus) return;
+      lastAutonomousStatus = run.status;
+      if (run.status === 'waiting_approval') {
+        appendSeparator();
+        appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
+        appendAutonomousDecision();
+      } else if (run.status === 'waiting_input') {
+        const clarification = [...(run.events || [])].reverse().find(event => event.kind === 'clarification');
+        appendSeparator();
+        appendAutonomousDecision('clarification', clarification?.text || 'The agent needs clarification before it can continue.');
+      } else if (['completed', 'failed', 'cancelled', 'limit_reached'].includes(run.status)) {
+        const detail = run.error ? `${run.status}: ${run.error}` : `Autonomous run ${run.status}.`;
+        completeAutonomousUI(detail);
+      }
+    }
+
+    function completeAutonomousUI(message) {
+      stopAutonomousStatusPolling();
+      isAutonomousActive = false;
+      autonomousGoalBanner.style.display = 'none';
+      autonomousStartBtn.style.display = 'inline-flex';
+      autonomousStopBtn.style.display = 'none';
+      enableAllButtons();
+      appendSeparator();
+      appendLine(message, 'plain');
+      fetchPrompt();
+      saveState();
+    }
+
     function disableAllButtons() {
       // Disable all buttons except /autostop
       promptBtn.disabled = true;
@@ -1975,6 +2082,7 @@
       document.querySelector('.file-upload-btn').disabled = true;
       toggleAttachedFileBtn.disabled = true;
       fileUpload.disabled = true;
+      updateChatInputState();
       
       // Apply disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
@@ -2001,6 +2109,7 @@
       document.querySelector('.file-upload-btn').disabled = false;
       toggleAttachedFileBtn.disabled = false;
       fileUpload.disabled = false;
+      updateChatInputState();
       
       // Remove disabled styling
       const buttons = [promptBtn, editPromptBtn, helpBtn, myPromptsBtn, lastBtn, clearBtn, 
