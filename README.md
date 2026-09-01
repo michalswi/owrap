@@ -11,289 +11,117 @@
 [![security](https://img.shields.io/badge/For-whatever-8B0000.svg?style=for-the-badge)](#)
 [![ai](https://img.shields.io/badge/AI-Powered-cyan.svg?style=for-the-badge)](#)
 
-![img](./img/owrapui.png)
+![OWRAP web UI](./img/owrapui.png)
 
 </div>
 
-**owrap** is a local Go-based CLI and web UI wrapper around Ollama that:
+# OWRAP
 
-- Works in both terminal and web UI modes
-- Keeps all interactions local on your machine (no external API calls)
-- Sends your messages to the Ollama HTTP chat endpoint with your configured model
-- Supports Ollama model reasoning with runtime `/think-on` and `/think-off` controls; thinking starts disabled and Web reasoning is collapsed by default
-- Executes [allowlisted](./comm.go#L3) shell commands when explicitly requested by the model, captures stdout/stderr, and feeds the output back to continue the conversation
-- Maintains session logs with `/save` and `/load`, and preserves the active Web UI conversation across browser refreshes while OWRAP is running
-- Provides comprehensive slash commands for help, stats, cached blocks, file execution, session management, and more
-- Supports **file uploads** in web UI - reuse text/code files across prompts and enable or disable attached context
-- Enables **dynamic system prompt editing** - switch between predefined prompts or create custom ones on-the-fly (terminal: `/editsysprompt`, web UI: `Edit sys-prompt` button). More [here](#-system-prompts)
-- [beta version] Features **autonomous mode** in web UI - agent continuously works toward user-defined goals, executing commands, analyzing files, collecting information, and generating reports until completion. Supports optional file attachments as reference/knowledge base. More [here](#-autonomous-mode)
+OWRAP is a lightweight Go CLI and web UI for an Ollama-compatible chat endpoint. It supports configurable system prompts, optional model reasoning, session save/load, model-requested local commands, file attachments, and a web-only autonomous agent.
 
-**owrap** is available in two modes (*terminal* and *web UI*) and as a Docker image: `michalsw/owrap:latest` (all descriptions below).
+OWRAP is local-first, but it is not an isolation boundary: configured Ollama endpoints and executed commands may access the network. It is available as source, a native binary, and the `michalsw/owrap:latest` Docker image.
 
+## Requirements
 
-## Help
+- Go `1.25.5` or a downloaded OWRAP binary
+- A running [Ollama](https://ollama.com/) server
+- A local model, for example:
 
-```
-$ ./owrap
-
- ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
-██╔═══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗
-██║   ██║██║ █╗ ██║██████╔╝███████║██████╔╝
-██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
-╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
- ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.2 - @michalswi
-
-Type '/q' to quit.
-Type '/h' for help/shortcuts.
-------------------------------------------------------------
-You: /h
-Available commands:
-  /h             Show this help
-  /q             Exit the program
-  /dir           Show current working directory
-  /m             Show Ollama LLM model in use
-  /up            Show app uptime
-  /s, /stats     Show counts, chars, context estimate, timing, and last command
-  /last          Show last prompt + model answer
-  /myprompts     Show all your prompts from current session
-  /sysprompt     Show current system prompt
-  /editsysprompt Edit system prompt (select from files or write custom)
-  /save [NAME]   Save current session to ~/.owrap/sessions (auto-named if NAME omitted)
-  /load NAME     Load a saved session by name
-  /sessions      List all saved sessions in ~/.owrap/sessions
-  /p [DELIM]     Paste multi-line input; finish with a line containing only DELIM (default EOF)
-  /cache         List cached (not sent) blocks
-  /use N         Send cached block #N (1-based) with optional question
-  /auto-on       LLM auto-analyzes command output after execution
-  /auto-off      [default] No LLM auto-analysis after command execution
-  /think-on      Ask supported models to return reasoning
-  /think-off     [default] Disable model reasoning
-  /execfile P    Execute each non-empty line in file P (no analysis)
-Model-run allowed commands:
-  [ansible, arp, cat, chmod, curl, date, df, dig, echo, ffuf, find, for, grep, head, httpx, ip, jq, ls, nc, netcat, nmap, nslookup, openssl, ping, pwd, sh, sort, subfinder, tail, telnet, terraform, traceroute, tree, uniq, uptime, wc, wget, while, whois, xargs]
-------------------------------------------------------------
-
-
-> [webui version] (described below)
-$ ./owrap -h
-Usage of ./owrap:
-  -web
-    	serve the web UI instead of the CLI
+```sh
+ollama serve
+ollama pull qwen3.5:0.8b
 ```
 
-## Quickstart [terminal + webui]
+Larger models generally perform better in autonomous mode.
 
-### > prereq
+## Configuration
 
-App requires that Ollama is up and running, e.g.
-```
-$ ollama serve
-(...)
+| Variable | Default | Purpose |
+|---|---|---|
+| `OLLAMA_URL` | `http://localhost:11434/api/chat` | Ollama-compatible chat endpoint |
+| `OLLAMA_MODEL` | `qwen3.5:0.8b` | Model used for requests |
+| `SYSTEM_PROMPT` | built-in prompt | Path to the startup system-prompt file |
+| `WEB_BIND` | `:8080` | Web server listen address |
 
-$ ollama pull qwen3.5:0.8b
+## Build and Run
 
-$ ollama ls
-NAME                  ID              SIZE      MODIFIED
-qwen3.5:0.8b          f3817196d142    1.0 GB    2 months ago
-gemma3:4b             a2af6cc3eb7f    3.3 GB    2 months ago
-llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
-```
+Build the current-platform binary:
 
-- **URL** to connect to Ollama: `http://localhost:11434/api/chat` (override with env var `OLLAMA_URL`)
-- **LLM model**: `qwen3.5:0.8b` (override with env var `OLLAMA_MODEL`)
-- **System prompt**: Defined [here](./vars.go) by default. You can:
-  - Set `SYSTEM_PROMPT` env var to a prompt file path (e.g., `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt`) to load at startup
-  - Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI) to change it at runtime
-  - Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI) to display the current one
-  - Falls back to default if the file cannot be read
-  - Find more about available prompts [here](#-system-prompts)
-- **Web UI port**: `:8080` (override with env var `WEB_BIND`)
-
-### > thinking mode
-
-Thinking mode is disabled whenever OWRAP starts. Use `/think-on` and `/think-off` at runtime; the setting applies to subsequent model requests without restarting the app. In the Web UI, the selected control and status badge are green when thinking is enabled and amber when it is disabled.
-
-Models that support Ollama reasoning return it separately from the final answer. The Web UI displays this content under a collapsed **Model reasoning** section. Reasoning remains available with the active conversation across browser refreshes. Restarting OWRAP starts a fresh chat and resets thinking mode; use `/save` before restart and `/load` afterward to continue an earlier session. Models without thinking support continue normally and simply return no reasoning section.
-
-Persisted reasoning contributes to assistant-character and estimated-context statistics.
-
-### > run app [terminal version]
-
-```
-$ you might use predefined system prompts from ./prompts,
-include 'prompts' dir in the same folder where 'owrap' app
-
-$ ./owrap
-
- ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
-██╔═══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗
-██║   ██║██║ █╗ ██║██████╔╝███████║██████╔╝
-██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
-╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
- ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.2 - @michalswi
-
-Type '/q' to quit.
-Type '/h' for help/shortcuts.
-------------------------------------------------------------
-You: hi
-Assistant: Hi there! How can I help you today?
-------------------------------------------------------------
+```sh
+make build
 ```
 
-```
-$ SYSTEM_PROMPT=./prompts/(...).txt ./owrap
+Keep the `prompts/` directory beside the binary; prompt files are runtime dependencies.
 
- ██████╗ ██╗    ██╗██████╗  █████╗ ██████╗
-██╔═══██╗██║    ██║██╔══██╗██╔══██╗██╔══██╗
-██║   ██║██║ █╗ ██║██████╔╝███████║██████╔╝
-██║   ██║██║███╗██║██╔══██╗██╔══██║██╔═══╝
-╚██████╔╝╚███╔███╔╝██║  ██║██║  ██║██║
- ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝
-	v0.5.2 - @michalswi
-
-Type '/q' to quit.
-Type '/h' for help/shortcuts.
-------------------------------------------------------------
-You:
+```sh
+./owrap       # terminal mode
+./owrap -web  # web UI at http://localhost:8080/
 ```
 
-### > run app [webui version]
-```
-$ you might use predefined system prompts from ./prompts,
-include 'prompts' dir in the same folder where 'owrap' app
+Example with custom settings:
 
-$ ./owrap -web
-2025/12/28 16:19:44 web UI listening on :8080 (model=qwen3.5:0.8b, prompt=default, chars=481)
-
-$ open in web browser http://localhost:8080/
+```sh
+OLLAMA_MODEL=gemma3:12b \
+SYSTEM_PROMPT=./prompts/shell_command_assistant.txt \
+WEB_BIND=127.0.0.1:8080 \
+./owrap -web
 ```
 
-![owrapui](./img/owrapui.png)
+Other targets include `make build-mac`, `make build-linux`, `make go-build`, and `make docker-build`.
+
+Thinking is disabled at startup. Use `/think-on` and `/think-off`; supported models return reasoning separately, and the web UI displays it in a collapsed section.
 
 
-## \# Quickstart [docker]
+## Docker
 
-### > prereq
+The image supports `linux/amd64` and `linux/arm64`. Ollama must be reachable from the container, so do not use container-local `localhost` for a host Ollama server.
 
-App requires that Ollama is up and running, e.g.
-```
-> OLLAMA_HOST because we need IP instead of localhost
-$ OLLAMA_HOST=0.0.0.0 ollama serve
-(...)
-
-$ ollama pull gemma3:4b
-
-$ ollama ls
-NAME                  ID              SIZE      MODIFIED
-gemma3:4b             a2af6cc3eb7f    3.3 GB    5 days ago
-llama3.2:latest       a80c4f17acd5    2.0 GB    2 months ago
+```sh
+docker run -d --rm \
+  --name owrap \
+  -e OLLAMA_URL="http://<ollama-host>:11434/api/chat" \
+  -p 8080:8080 \
+  michalsw/owrap:latest
 ```
 
-### > run docker
+Not every command listed in [comm.go](./comm.go) is installed in the image.
 
-Docker image is available for both architectures/platforms `linux/amd64` and `linux/arm64`.
+## Usage
 
-Allowed commands to use in owrap are [here](./comm.go). **NOT** all of them are included in docker image.
+Run `/h` in the terminal for the complete command list. Common controls are:
 
-**env vars** are the same `OLLAMA_URL`, `OLLAMA_MODEL` etc.
+| Command | Purpose |
+|---|---|
+| `/save [NAME]`, `/load NAME`, `/sessions` | Save, restore, and list sessions |
+| `/editsysprompt`, `/sysprompt` | Change or inspect the system prompt |
+| `/think-on`, `/think-off` | Enable or disable model reasoning |
+| `/auto-on`, `/auto-off` | Toggle automatic command-output analysis |
+| `/stats`, `/last`, `/myprompts` | Inspect current session activity |
+| `/p`, `/cache`, `/use` | Work with multiline cached input |
+| `/execfile PATH` | Execute nonempty command lines from a file |
 
-```
-$ docker run -d --rm \
---name owrap \
---pull always \
--e OLLAMA_URL="http://<ollama_host_ip>:11434/api/chat" \
--p 8080:8080 \
-michalsw/owrap:latest
+The web UI exposes equivalent controls where supported. Predefined roles are in [prompts/](./prompts/); custom `.txt` prompts can be added there.
 
-$ docker ps
+Model-requested commands are checked against [comm.go](./comm.go), and stdout/stderr is returned to the model. This is not a security sandbox: shell-capable paths and the direct command API execute with the permissions of the OWRAP process.
 
-$ docker stop owrap
-```
+## Sessions and Files
 
-## \# System Prompts
+- Named sessions: `~/.owrap/sessions/`
+- Active web state: `~/.owrap/web_state.json`
+- Autonomous attachments: `~/.owrap/autonomous_files/<session-id>/`
 
-The system prompt defines the assistant's behavior and capabilities. The default prompt is defined [here](./vars.go).
+Browser refreshes preserve the active web chat while OWRAP is running. Stopping and starting OWRAP creates a fresh chat and removes stale autonomous files. Use `/save` before restart and `/load` afterward to continue previous work.
 
-**Predefined prompts** available in `./prompts/`:
-- `apps_developer.txt` - Application development assistant
-- `cloud_engineer.txt` - Cloud infrastructure and DevOps helper
-- `japanese_teacher.txt` - Japanese language learning assistant
-- `local_network_recon.txt` - Local network reconnaissance guide
-- `web_recon.txt` - General web (OWASP based) reconnaissance assistant
-- `shell_command_assistant.txt` - Shell command helper and executor
-- `prompt_engineer.txt` - System prompts creation assistant
+## Autonomous Mode
 
-**How to use**:
-- **At startup**: `SYSTEM_PROMPT=./prompts/shell_command_assistant.txt ./owrap`
-- **At runtime**: Use `/editsysprompt` (terminal) or `Edit sys-prompt` button (web UI)
-- **View current**: Use `/sysprompt` (terminal) or `Show sys-prompt` button (web UI)
-- **Review your prompts**: Use `/myprompts` (terminal) or `/myprompts` button (web UI) to see all your prompts from the current session. In web UI, click any prompt to reuse it. They might be saved (/save) and restored (/load) when restoring the session.
+Autonomous mode is a beta web-only workflow. Select `/autostart`, provide an objective plus optional expected output, constraints, completion criteria, and file attachment, then start the run.
 
-**Creating custom prompts**: Create a `.txt` file in the `./prompts/` directory with your instructions. The prompt should define the assistant's role, capabilities, and response format
+The backend owns the execution loop. It can plan, run allowed tools, inspect observations, retry failed commands, ask clarification questions, and submit a candidate answer. A separate critic pass checks the answer against the goal and evidence. The user can provide revision feedback, accept the result, or stop with `/autostop`.
 
-## \# Autonomous Mode
+Runs are limited to 30 iterations and 30 minutes; model calls and foreground commands have two-minute deadlines. Browser refreshes do not interrupt a run, but restarting OWRAP clears it.
 
-**Web UI Only** [beta version]
+## Security and License
 
-Autonomous mode enables the AI agent to work continuously and independently toward a user-defined goal until completion or manual stop. Unlike regular chat mode where each message requires user input, autonomous mode operates in a self-directed loop.
+OWRAP has no authentication, TLS, CSRF protection, or command sandbox. Use it only in a trusted environment and only against systems you are authorized to access. You are responsible for commands and network activity initiated through the application.
 
-Works **best** with larger models (more parameters), tested with `gemma3:12b` and `mistral:7b`.  
-
-Because it's **beta version** it would require more work to improve the way how models achieve defined goals [inprogress].
-
-**How to Use:**
-1. Click `/autostart` button in web UI
-2. Enter the objective, expected output, completion criteria, and any constraints
-3. Optionally attach a file for reference (Choose File button)
-4. Click **Start Autonomous Work**
-5. Watch the agent plan and work until it proposes a candidate answer or asks for clarification
-6. Supply requested clarification, or review the answer and choose **Continue working** or **End loop**
-7. Use `/autostop` to manually stop at any time
-
-**Example Use Cases:**
-- Network reconnaissance: "Scan 192.168.1.0/24 network and create a report of all active hosts and open ports"
-- File analysis: "Analyze this Apache access.log file and identify the top 10 most common errors"
-- Data processing: "Extract all email addresses from this document and save them to a file"
-- Research: "Research Azure Firewall features using the attached documentation and create a deployment guide"
-- Multi-step tasks: "Check website availability, analyze SSL certificate, test DNS records, and generate security report"
-
-**Key Features:**
-- **Goal-Oriented**: Define a high-level objective (e.g., "analyze the network security of domain.com and create a detailed report")
-- **Structured Goal Contract**: Record the objective, expected output, constraints, and explicit completion criteria separately
-- **Selected Prompt Preserved**: Autonomous mode keeps the active default, predefined, or custom system prompt and appends its generic JSON action protocol
-- **Clean Run Context**: Each new autonomous run excludes earlier messages and resets command history, retries, and partial findings while keeping the transcript visible in the UI
-- **Server-Owned Execution**: A backend worker executes, observes, and plans each step; the run continues when the browser is refreshed or closed
-- **Environment-Aware**: The run tells the model which allowlisted commands are installed, which are unavailable, the operating system, and the working directory
-- **Adaptive Context**: Recent events are selected by a 4096-token budget; older events are condensed into a persisted semantic summary while the full event log remains available for audit
-- **Explicit Planning**: Multi-step work can create a plan, complete steps, and associate evidence event IDs with completed steps
-- **Independent Verification**: A separate critic model call checks each candidate against the goal, plan, completion criteria, and recorded evidence before showing it for approval
-- **Clarification Loop**: Ambiguous work can pause with a specific question; normal chat stays locked while the user supplies feedback and the run resumes
-- **Bounded Operation**: Runs stop after 30 iterations or 30 minutes; model calls and foreground commands each have two-minute deadlines
-- **Multi-Capability**: Combines command execution, file analysis, data collection, and report generation
-- **File Attachments**: Optionally attach reference files (configs, documentation, data files) that serve as a knowledge base
-  - Files are saved to `~/.owrap/autonomous_files/<sessionId>/`
-  - Agent can use command-line tools (cat, grep, jq, awk, etc.) to analyze attached files
-  - Useful for tasks like "analyze this log file and identify errors" or "create a report based on this configuration"
-- **Smart Iteration**: Agent tracks command history, avoids duplicate commands, and learns from failures
-- **User-Controlled Completion**: Candidate answers pause the loop so you can continue working or accept the result and end the loop
-- **Decision Recovery**: Refreshing the Web UI restores a pending approval or clarification decision
-- **Process-Lifetime Recovery**: Run status and sequenced events survive browser refreshes while OWRAP is running; restarting OWRAP clears the active run and chat
-- **Protocol Recovery**: Invalid JSON or unsupported actions share one three-attempt retry counter. Recovery guidance allows either a direct `answer` or another supported tool action; after the third consecutive failure, OWRAP performs the same cleanup as **Stop autonomous**
-- **Execution Evidence**: When a goal explicitly names an allowlisted command, OWRAP rejects candidate answers until that command has produced a successful real observation
-- **Failed-Command Recovery**: After an initial foreground-command failure, the agent must inspect the observation and attempt a corrected or alternative command; repeated failures can be reported only after critic verification
-- **Job Recovery**: Missing background job IDs and job-start failures are returned to the agent as context, and the autonomous loop continues with another step
-- **Run-Owned Jobs**: Stopping or terminating a run cancels its active background jobs
-- **Manual Control**: `/autostop` button available for manual interruption at any time
-
-**Notes:**
-- All actions are logged and can be reviewed during execution
-- Commands are subject to the same [allowlist](./comm.go#L3) as regular mode
-- Stopping and starting OWRAP creates a fresh Web chat. Use `/save` and `/load` for conversations you want to keep across application restarts
-
-## \# Disclaimer
-
-**Important**: Read This Before Using
-
-This tool is designed for educational purposes. Not for malicious or illegal activities. Users are solely responsible for how they use this tool. The developers are not liable for any misuse or damage caused.
+Licensed under the [Apache License 2.0](LICENSE).

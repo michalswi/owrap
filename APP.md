@@ -44,7 +44,7 @@ Keep these boundaries in mind when reasoning about the app:
 - `prompts/*.txt`: predefined role prompts and the autonomous-agent protocol prompt.
 - `Makefile`: native, cross-platform, and multi-architecture Docker build targets.
 - `Dockerfile`: multi-stage image that runs web mode as an unprivileged `app` user.
-- `README.md`: user-facing overview, setup, examples, Docker usage, prompt catalog, and autonomous-mode guide.
+- `README.md`: concise operator guide covering setup, configuration, run modes, common controls, persistence, security, and autonomous-mode usage.
 
 ## Runtime Configuration
 
@@ -94,7 +94,7 @@ or:
 
 In normal chat, malformed or plain-text model output is displayed as an answer. In autonomous mode, valid JSON is mandatory and malformed output enters a retry flow.
 
-The HTTP client creates context-aware requests, so Web request cancellation propagates to Ollama. It uses the default HTTP client without a fixed timeout and does not explicitly reject non-success HTTP status codes before decoding the response.
+The HTTP client creates context-aware requests, so cancellation propagates to Ollama. The shared client has no fixed timeout and does not explicitly reject non-success HTTP status codes before decoding the response. Autonomous model calls add a two-minute context deadline; normal chat has no equivalent application deadline.
 
 ## Core Data Model
 
@@ -181,7 +181,7 @@ Session loading restores active conversational context. Saved sessions can there
 
 Web mode uses `net/http.ServeMux`. The binary embeds `webstatic/*` with `go:embed`; `index.html` is served at `/`, and embedded files are exposed under `/static/`.
 
-The Go server owns one active Web UI session and persists it to `~/.owrap/web_state.json` during the process lifetime. A newly opened or refreshed browser restores structured messages and stats through `GET /api/state`; `localStorage` is only a fallback for UI state and stores theme preferences. Starting OWRAP initializes and persists a fresh session rather than restoring the previous process's active chat. A generated session ID has the form `sess_<UnixNano>`.
+The Go server owns one active Web UI session and persists it to `~/.owrap/web_state.json` during the process lifetime. A newly opened or refreshed browser restores structured messages and stats through `GET /api/state`. Browser `localStorage` keeps a fallback rendering of the log, session ID, and stats if that request fails; theme is stored separately. Starting OWRAP initializes and persists a fresh session rather than restoring the previous process's active chat. A generated session ID has the form `sess_<UnixNano>`.
 
 HTTP endpoints:
 
@@ -282,6 +282,7 @@ Autonomous state management includes:
 - Up to three consecutive protocol or model failures.
 - Strict single-object JSON decoding with unknown fields rejected.
 - A completion gate that requires an observation when the goal explicitly names an allowlisted command.
+- After an initial failed foreground command, only a corrected or alternative `run_command` action is accepted; after two command failures, a claimed impossibility still requires critic approval.
 - Per-run cancellation for foreground commands and background jobs.
 
 The server worker owns the loop. Closing or refreshing the browser does not stop progress while OWRAP remains running; the UI reconstructs it from persisted status and events.
@@ -292,7 +293,7 @@ The autonomous prompt is designed for larger local models and insists on a singl
 
 CLI and web saves use JSON files in `~/.owrap/sessions`. An omitted name produces `owrap_YYYYMMDD_HHMM.json`; a supplied name receives `.json` if needed. Files are sorted alphabetically when listed.
 
-Starting OWRAP creates a fresh active Web conversation, removes stale autonomous attachments, and replaces `~/.owrap/web_state.json`. Previous conversations remain available only when explicitly saved under `~/.owrap/sessions` and restored with `/load`. Browser refreshes during the same process still restore the active chat and autonomous run. Background job process metadata remains memory-only.
+Starting OWRAP creates a fresh active Web conversation, removes stale autonomous attachments, and replaces `~/.owrap/web_state.json`. Only the active Web session is written there. Previous conversations remain available across application restarts only when explicitly saved under `~/.owrap/sessions` and restored with `/load`. Browser refreshes during the same process still restore the active chat and autonomous run. Background job process metadata remains memory-only.
 
 Autonomous attachments are temporary and terminal run cleanup removes the session directory. A waiting-approval or waiting-input run retains its attachment until it continues, is accepted where applicable, or is stopped.
 
@@ -314,42 +315,53 @@ The Docker build uses Go on Alpine, creates a stripped static-style binary with 
 
 The Docker image supports `linux/amd64` and `linux/arm64` through `docker buildx`. Commands present in the source allowlist are not necessarily installed in the image; the repository explicitly calls out `ffuf`, `subfinder`, `httpx`, `terraform`, and `ansible` as unavailable there.
 
-## Verified Limitations and Risks
+## Architecture Constraints and Known Gaps
 
-Do not overstate the current guarantees. Account for these implementation realities when proposing changes or answering questions:
+Do not infer guarantees beyond the behavior below when reviewing or modifying the application.
 
-1. **Allowlist bypasses exist.** Commands containing `&&`, `||`, or `;` bypass per-command allowlist checks through `bash -c`. Background jobs do the same. The allowlisted `sh` command can also invoke arbitrary shell content. Therefore the current implementation is not a strict command sandbox.
-2. **Direct command API has no authentication.** Any client that can reach `POST /api/command` can request command execution as the OWRAP process user.
-3. **File writes are broad.** Redirection, `tee`, attachments, prompt filenames, and session names are not confined by a robust filesystem sandbox. Treat path traversal and arbitrary writable paths as review concerns.
-4. **Normal Web prompt state is globally coupled.** Concurrent normal-chat sessions can change one another's selected prompt. Autonomous runs avoid mid-run prompt changes by capturing an immutable prompt at startup.
-5. **“Local” is a deployment intention, not an enforced network boundary.** The default bind may expose the server beyond loopback, and many allowlisted tools make outbound network requests.
-6. **No HTTP hardening layer is present.** There is no authentication, CSRF defense, request-body limit, general server timeout configuration, or TLS termination in the app.
-7. **Normal Ollama calls can hang.** Autonomous calls have a two-minute deadline, but normal chat still uses no fixed model timeout.
-8. **Prompt/tool mismatch exists.** The autonomous and shell-assistant prompts recommend `uname`, but `uname` is absent from the simple-command allowlist.
-9. **CLI prompt editing is not fully applied to existing context.** Displayed global prompt state can diverge from the system message actually sent in the CLI conversation.
-10. **Statistics are approximate.** Some raw fallback responses and command-output messages are appended without incrementing assistant counters.
-11. **Autonomous runs do not survive application restart.** Action intent is persisted for process-lifetime recovery and audit, but startup intentionally creates a fresh chat instead of replaying interrupted work.
-12. **Build metadata has a naming mismatch.** The Makefile injects `main.Version`, while the source declares lowercase `version`; the linker override therefore does not target that variable.
-13. **README security wording is stronger than the implementation.** README says model commands are allowlisted, but shell and background paths mean that is not universally true.
+### Trust Boundaries
+
+- **Command execution is not sandboxed.** Commands containing `&&`, `||`, or `;` use `bash -c`; background jobs do the same, and allowlisted `sh` can invoke arbitrary shell content.
+- **The direct command API is unauthenticated.** Any client that can reach `POST /api/command` can request execution with the permissions of the OWRAP process.
+- **Writable paths are broad.** Redirection, `tee`, attachments, prompt filenames, and session names are not confined by a filesystem sandbox.
+- **Local-first is not a network guarantee.** `WEB_BIND=:8080` may expose the server beyond loopback, `OLLAMA_URL` may be remote, and command tools can make outbound requests.
+- **HTTP hardening is absent.** The app has no authentication, authorization, CSRF protection, request-body limits, server-wide timeouts, or TLS termination.
+
+### Behavioral and Operational Gaps
+
+- **Normal Web prompt state is global.** Normal-chat sessions can change the shared selected prompt; autonomous runs avoid mid-run changes by capturing the prompt at startup.
+- **Normal Ollama calls have no fixed deadline.** Autonomous model calls are bounded to two minutes, but normal chat can wait indefinitely unless its request context is cancelled.
+- **The shell-assistant prompt mentions `uname`, but the allowlist does not contain it.** Model guidance and executable capabilities can therefore diverge.
+- **CLI prompt editing does not rebuild existing context.** `/editsysprompt` changes displayed global state, while the existing CLI system message may remain unchanged.
+- **Statistics are approximate.** Some raw fallback responses and command-output messages are appended without incrementing assistant counters.
+- **Autonomous runs do not survive application restart.** Persisted active state supports browser refreshes during one process; startup intentionally creates a fresh chat instead of replaying work.
+- **Build metadata injection targets the wrong symbol.** The Makefile sets `main.Version`, while the source declares lowercase `version`.
 
 ## Guidance for Models Working on This Repository
 
-When asked to modify or analyze OWRAP:
+Use the following priorities when analyzing or modifying OWRAP.
 
-1. Preserve the two-mode product: CLI by default and embedded web UI with `-web`.
-2. Keep Ollama compatibility and the existing `ChatMessage` conversation shape unless a migration is explicitly requested.
-3. Treat command execution, HTTP exposure, path handling, uploaded content, and session concurrency as trust boundaries.
-4. Never assume the allowlist alone is a sandbox; trace the exact execution path.
-5. Distinguish process-global configuration from per-session state.
-6. Keep CLI and web behavior aligned where they advertise the same feature.
-7. Keep normal chat tolerant of plain-text model responses unless requirements change.
-8. Keep autonomous actions strict and machine-readable; update the Go schema, prompt, worker, observer UI, and lifecycle tests together when changing the protocol.
-9. Preserve conversation save-file compatibility when practical.
-10. Remember that web assets are embedded but prompt files are runtime filesystem dependencies.
-11. Prefer focused standard-library solutions consistent with this small codebase.
-12. Add tests proportionate to risk, especially before changing command execution or autonomous state transitions.
-13. Update `README.md`, prompt files, and this document when user-visible behavior or model contracts change.
-14. Do not claim a security property unless every command path and HTTP entry point enforces it.
+### Product Invariants
+
+- Preserve CLI mode as the default and embedded web mode behind `-web`.
+- Keep Ollama compatibility and the `ChatMessage` shape unless a migration is explicitly requested.
+- Keep normal chat tolerant of plain-text model responses.
+- Keep CLI and web behavior aligned where they advertise the same feature.
+- Distinguish process-global configuration from per-session and per-run state.
+- Remember that web assets are embedded, while prompt files remain runtime filesystem dependencies.
+
+### Trust and Compatibility
+
+- Trace the exact execution path for command, HTTP, upload, path, and concurrency changes; never treat the allowlist alone as a sandbox.
+- Do not claim a security property unless every command path and HTTP entry point enforces it.
+- Preserve saved-session compatibility when practical.
+- Keep autonomous actions strict and machine-readable. Protocol changes must cover the Go schema, prompt, worker, observer UI, persistence, and lifecycle tests together.
+
+### Change Discipline
+
+- Prefer focused standard-library solutions consistent with the existing codebase.
+- Add tests proportionate to risk, especially for execution paths and autonomous state transitions.
+- Update `README.md` for operator-visible behavior and this document for architecture or model-contract changes.
 
 ## Compact Mental Model
 
