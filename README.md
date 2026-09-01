@@ -114,7 +114,7 @@ Browser refreshes preserve the active web chat while OWRAP is running. Stopping 
 
 ## Autonomous Mode
 
-Autonomous mode is a beta web-only workflow. Select `/autostart`, provide an objective plus optional expected output, constraints, completion criteria, and file attachment, then start the run.
+Autonomous mode is a beta web-only workflow. Select `/autostart`, provide an objective plus optional expected output, constraints, completion criteria, and file attachment, then start the run. Starting autonomous mode resets the active system prompt to the built-in `default`; that prompt remains selected after the run ends.
 
 The backend owns the execution loop. It can plan, run allowed tools, inspect observations, retry failed commands, ask clarification questions, and submit a candidate answer. A separate critic pass checks the answer against the goal and evidence. The user can provide revision feedback, accept the result, or stop with `/autostop`.
 

@@ -697,8 +697,13 @@ func TestAutonomousLifecycleAPI(t *testing.T) {
 	defer ollama.Close()
 
 	previousURL, previousStore := ollamaURL, webStore
+	previousPrompt, previousPromptName := systemPrompt, systemPromptName
 	ollamaURL, webStore = ollama.URL, newWebSessionStore()
-	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+	systemPrompt, systemPromptName = "custom developer prompt", "apps_developer.txt"
+	t.Cleanup(func() {
+		ollamaURL, webStore = previousURL, previousStore
+		systemPrompt, systemPromptName = previousPrompt, previousPromptName
+	})
 
 	start := httptest.NewRecorder()
 	handleAutonomousStart(start, httptest.NewRequest(http.MethodPost, "/api/autonomous/start", bytes.NewBufferString(`{"goal":"answer independently"}`)))
@@ -711,6 +716,9 @@ func TestAutonomousLifecycleAPI(t *testing.T) {
 	}
 	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil {
 		t.Fatal(err)
+	}
+	if started.Run.BasePrompt != defaultSystemPrompt || started.Run.BasePromptName != "default" || systemPrompt != defaultSystemPrompt || systemPromptName != "default" {
+		t.Fatalf("autonomous start did not reset prompt to default: run=%+v global=%q/%q", started.Run, systemPromptName, systemPrompt)
 	}
 	waitForAutonomousStatus(t, started.SessionID, autonomousWaitingApproval)
 

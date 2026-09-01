@@ -1760,7 +1760,7 @@
         </div>
         
         <div style="margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; font-size: 12px; color: var(--muted);">
-          ⚠️ <strong>Autonomous Mode:</strong> Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
+          ⚠️ <strong>Autonomous Mode:</strong> Starting resets the system prompt to <strong>default</strong>. Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
         </div>
         
         <div style="margin-top: 16px; display: flex; gap: 10px;">
@@ -1896,6 +1896,7 @@
         
         appendSeparator();
         appendLine('🤖 Autonomous mode ACTIVATED', 'assistant');
+        appendLine('System prompt reset to: default', 'assistant');
         appendLine(`Goal: ${goal}`, 'assistant');
         if (attachedFilePath) {
           appendLine(`📎 File available: ${attachedFileName} at ${attachedFilePath}`, 'assistant');

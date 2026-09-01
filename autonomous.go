@@ -52,8 +52,10 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "an autonomous run is already active", http.StatusConflict)
 		return
 	}
-	basePrompt := systemPrompt
-	basePromptName := systemPromptName
+	systemPrompt = defaultSystemPrompt
+	systemPromptName = "default"
+	basePrompt := defaultSystemPrompt
+	basePromptName := "default"
 	sess.OriginalPrompt = basePrompt
 	sess.OriginalPromptName = basePromptName
 

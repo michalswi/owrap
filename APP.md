@@ -203,7 +203,7 @@ HTTP endpoints:
 
 Web chat recognizes `/auto-on`, `/auto-off`, `/think-on`, `/think-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
 
-The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For autonomous work, JavaScript starts a run once and polls `/api/autonomous/status` every second; it observes sequenced events and submits stop, approval, revision-feedback, or clarification decisions but does not drive model iterations. The backend captures the selected default, predefined, or custom prompt for the run and appends the domain-neutral JSON protocol from `prompts/autonomous_agent.txt`. Earlier chat and autonomous messages remain visible but are excluded from the run's token-budgeted event context. An `answer` is independently verified before changing the run to `waiting_approval`; `request_clarification` changes it to `waiting_input`. Normal chat remains disabled in both states. Malformed JSON and unsupported actions share one three-attempt failure counter, while tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
+The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For autonomous work, JavaScript starts a run once and polls `/api/autonomous/status` every second; it observes sequenced events and submits stop, approval, revision-feedback, or clarification decisions but does not drive model iterations. Starting a run resets the global prompt and the run's immutable base prompt to the built-in `default`, then appends the domain-neutral JSON protocol from `prompts/autonomous_agent.txt`. Earlier chat and autonomous messages remain visible but are excluded from the run's token-budgeted event context. An `answer` is independently verified before changing the run to `waiting_approval`; `request_clarification` changes it to `waiting_input`. Normal chat remains disabled in both states. Malformed JSON and unsupported actions share one three-attempt failure counter, while tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
 
 ## Prompt System
 
@@ -222,7 +222,7 @@ Predefined files provide these roles:
 
 The prompt directory is read from the current working directory at runtime. It is not embedded with the web UI. Distributions must therefore keep `prompts/` beside the running application, especially for autonomous mode.
 
-Prompt selection for normal chat is global, not stored independently in each web session. An autonomous run captures an immutable copy of the selected prompt at startup and does not mutate the global prompt.
+Prompt selection for normal chat is global, not stored independently in each web session. Starting autonomous mode intentionally resets this global selection to the built-in `default`; the run captures that default and the selection remains `default` after autonomous mode ends.
 
 In CLI mode, `/editsysprompt` updates the global prompt variables, but the already-created in-memory `messages` slice retains its original system message. Without rebuilding that slice, later model requests may continue to use the old prompt even though `/sysprompt` reports the new one.
 
@@ -261,7 +261,7 @@ Background jobs have IDs like `job_<UnixNano>` and statuses `running`, `complete
 Autonomous mode is beta and web-only. Its intended lifecycle is:
 
 1. The browser submits a required objective, optional expected output, constraints, completion criteria, and optional file attachment.
-2. The server creates or reuses a web session and captures the current global prompt in a new `AutonomousRun`.
+2. The server creates or reuses a web session, resets the global prompt to the built-in default, and captures that default in a new `AutonomousRun`.
 3. Attachment content is written under `~/.owrap/autonomous_files/<session-id>/`.
 4. The run is persisted before its backend worker starts.
 5. The worker composes the captured prompt with `prompts/autonomous_agent.txt`, the detected runtime capabilities, the current plan, the persisted summary, and recent token-budgeted events.
@@ -329,7 +329,7 @@ Do not infer guarantees beyond the behavior below when reviewing or modifying th
 
 ### Behavioral and Operational Gaps
 
-- **Normal Web prompt state is global.** Normal-chat sessions can change the shared selected prompt; autonomous runs avoid mid-run changes by capturing the prompt at startup.
+- **Normal Web prompt state is global.** Normal-chat sessions can change the shared selected prompt. Starting autonomous mode resets it to `default`, which also becomes the run's immutable base prompt.
 - **Normal Ollama calls have no fixed deadline.** Autonomous model calls are bounded to two minutes, but normal chat can wait indefinitely unless its request context is cancelled.
 - **The shell-assistant prompt mentions `uname`, but the allowlist does not contain it.** Model guidance and executable capabilities can therefore diverge.
 - **CLI prompt editing does not rebuild existing context.** `/editsysprompt` changes displayed global state, while the existing CLI system message may remain unchanged.
