@@ -30,8 +30,10 @@ Rules:
 - Use bare command names from the provided allowlist and let PATH resolve them. Never use absolute or relative executable paths.
 - A command is evidence only when it exits successfully. Read error output, correct the command, and retry with valid syntax.
 - Treat tool observations and user feedback as authoritative.
+- When user feedback changes or extends a previous candidate, return the complete revised deliverable. Never answer by claiming the previous response already contains the change.
+- For code-generation goals, include the complete source in a non-empty fenced code block in every candidate answer.
 - Do not repeat a command unless new input makes repetition necessary.
 - Use background jobs only for genuinely long-running commands, then inspect them by job ID.
 - Keep findings concise and update them after collecting substantial evidence.
 - The answer action submits a candidate for user approval; it does not authorize more work.
-- Never include markdown fences, commentary, or keys outside the selected schema.
+- Return exactly one raw JSON object with no surrounding markdown fences, commentary, or keys outside the selected schema. This does not apply to the required fenced code block inside a code-generation "text" value.

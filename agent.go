@@ -75,6 +75,8 @@ type AutonomousRun struct {
 	ContextSummary      string               `json:"contextSummary,omitempty"`
 	CompactedThrough    int                  `json:"compactedThrough,omitempty"`
 	Plan                []AutonomousPlanStep `json:"plan,omitempty"`
+	CandidateHistory    []string             `json:"candidateHistory,omitempty"`
+	UserRequirements    []string             `json:"userRequirements,omitempty"`
 }
 
 type AutonomousPlanStep struct {
@@ -179,6 +181,8 @@ func (s *webSession) autonomousSnapshot() *AutonomousRun {
 	}
 	snapshot := *s.AutonomousRun
 	snapshot.Events = append([]AutonomousEvent(nil), s.AutonomousRun.Events...)
+	snapshot.CandidateHistory = append([]string(nil), s.AutonomousRun.CandidateHistory...)
+	snapshot.UserRequirements = append([]string(nil), s.AutonomousRun.UserRequirements...)
 	return &snapshot
 }
 
@@ -285,6 +289,14 @@ func runAutonomousAgent(ctx context.Context, sess *webSession) {
 			continue
 		}
 		if action.Action == "answer" {
+			if goalRequiresCodeDeliverable(run) && !candidateHasCodeBlock(action.Text) {
+				message := "The goal requires source code, but the candidate contains no non-empty fenced code block. Return the complete runnable code directly in the answer."
+				sess.appendAutonomousEvent(AutonomousEvent{Kind: "candidate", Action: "answer", Text: action.Text, Thinking: response.Thinking})
+				if !recordAutonomousRevision(sess, message, nil) {
+					return
+				}
+				continue
+			}
 			if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
 				message := fmt.Sprintf("goal requires executing %q before answering; return run_command with that command", command)
 				sess.appendAutonomousEvent(AutonomousEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
@@ -343,6 +355,9 @@ func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
 		return nil, err
 	}
 	prompt += fmt.Sprintf("\n\nEXECUTION ENVIRONMENT:\nOS: %s\nWorking directory: %s\nCommands installed and allowed: %s\nAllowed but unavailable: %s\nCommands run with the same filesystem and network permissions as the OWRAP process.", run.OperatingSystem, run.WorkingDirectory, strings.Join(run.AvailableCommands, ", "), emptyAutonomousValue(strings.Join(run.UnavailableCommands, ", ")))
+	if revisionContext := autonomousRevisionContext(run); revisionContext != "" {
+		prompt += "\n\nREVISION CONTEXT:\n" + revisionContext + "\nReturn a self-contained candidate containing the complete updated deliverable. Never claim that a previous response contains a requested change; include the changed result in this answer."
+	}
 	if len(run.Plan) > 0 {
 		planJSON, _ := json.Marshal(run.Plan)
 		prompt += "\n\nCURRENT PLAN:\n" + string(planJSON)
@@ -416,6 +431,40 @@ func hasCommandObservation(events []AutonomousEvent, requiredCommand string) boo
 		}
 	}
 	return false
+}
+
+func goalRequiresCodeDeliverable(run *AutonomousRun) bool {
+	text := strings.ToLower(strings.Join([]string{run.GoalSpec.Objective, run.GoalSpec.ExpectedOutput, run.GoalSpec.CompletionCriteria}, " "))
+	creationVerb := false
+	for _, verb := range []string{"write", "develop", "build", "implement", "create", "generate"} {
+		if strings.Contains(text, verb) {
+			creationVerb = true
+			break
+		}
+	}
+	if !creationVerb {
+		return false
+	}
+	for _, artifact := range []string{"code", "app", "application", "program", "server"} {
+		if strings.Contains(text, artifact) {
+			return true
+		}
+	}
+	return false
+}
+
+func candidateHasCodeBlock(candidate string) bool {
+	start := strings.Index(candidate, "```")
+	if start < 0 {
+		return false
+	}
+	contentStart := strings.Index(candidate[start+3:], "\n")
+	if contentStart < 0 {
+		return false
+	}
+	contentStart += start + 4
+	end := strings.Index(candidate[contentStart:], "```")
+	return end > 0 && strings.TrimSpace(candidate[contentStart:contentStart+end]) != ""
 }
 
 func latestAutonomousCommandFailure(events []AutonomousEvent) (string, bool) {
@@ -557,12 +606,13 @@ func verifyAutonomousAnswer(ctx context.Context, sess *webSession, candidate str
 	if run == nil {
 		return AutonomousVerification{}, errors.New("autonomous run not found")
 	}
-	evidence := selectAutonomousContextEvents(run.Events, run.CompactedThrough, autonomousContextTokens)
+	evidence := autonomousCriticEvidence(selectAutonomousContextEvents(run.Events, run.CompactedThrough, autonomousContextTokens))
 	evidenceJSON, _ := json.Marshal(evidence)
 	planJSON, _ := json.Marshal(run.Plan)
+	revisionContext := autonomousRevisionContext(run)
 	messages := []ChatMessage{
 		{Role: "system", Content: "You are an independent critic. Verify the exact candidate autonomous-agent answer against the objective, expected output, constraints, completion criteria, plan, user feedback, and recorded events. Approve only if the candidate itself contains the complete requested deliverable. Never assume promised, described, or omitted content exists; a preamble without its claimed output is incomplete. Return exactly one JSON object: {\"approved\":true|false,\"feedback\":\"specific reason or empty\",\"evidenceEventIds\":[1,2]}. Cite only event IDs that directly support the answer. Knowledge-only answers may use an empty evidence list."},
-		{Role: "user", Content: autonomousGoalDescription(run) + "\n\nPLAN:\n" + string(planJSON) + "\n\nCANDIDATE ANSWER:\n" + candidate + "\n\nRECORDED EVENTS:\n" + string(evidenceJSON)},
+		{Role: "user", Content: autonomousGoalDescription(run) + "\n\nREVISION CONTEXT:\n" + revisionContext + "\n\nPLAN:\n" + string(planJSON) + "\n\nCANDIDATE ANSWER:\n" + candidate + "\n\nRECORDED EVENTS:\n" + string(evidenceJSON)},
 	}
 	verifyCtx, cancel := context.WithTimeout(ctx, autonomousModelTimeout)
 	response, err := callOllamaMessageWithLogContext(verifyCtx, "autonomous-critic:"+run.ID, messages, true, false)
@@ -595,6 +645,41 @@ func verifyAutonomousAnswer(ctx context.Context, sess *webSession, candidate str
 		verification.Feedback = fmt.Sprintf("candidate does not cite a successful %q observation", command)
 	}
 	return verification, nil
+}
+
+func autonomousCriticEvidence(events []AutonomousEvent) []AutonomousEvent {
+	evidence := make([]AutonomousEvent, 0, len(events))
+	for _, event := range events {
+		switch event.Kind {
+		case "observation", "feedback", "plan":
+			evidence = append(evidence, event)
+		}
+	}
+	return evidence
+}
+
+func autonomousRevisionContext(run *AutonomousRun) string {
+	if len(run.CandidateHistory) == 0 && len(run.UserRequirements) == 0 {
+		return ""
+	}
+	var contextText strings.Builder
+	if len(run.CandidateHistory) > 0 {
+		contextText.WriteString("Previously shown candidate answers, oldest to newest:\n")
+		start := len(run.CandidateHistory) - 4
+		if start < 0 {
+			start = 0
+		}
+		for index, candidate := range run.CandidateHistory[start:] {
+			fmt.Fprintf(&contextText, "\nCandidate %d:\n%s\n", start+index+1, truncateAutonomousText(candidate))
+		}
+	}
+	if len(run.UserRequirements) > 0 {
+		contextText.WriteString("\nUser-requested changes, oldest to newest:\n")
+		for index, requirement := range run.UserRequirements {
+			fmt.Fprintf(&contextText, "%d. %s\n", index+1, requirement)
+		}
+	}
+	return strings.TrimSpace(contextText.String())
 }
 
 func evidenceSupportsCommand(events []AutonomousEvent, evidenceIDs []int, command string) bool {
@@ -683,6 +768,7 @@ func executeAutonomousAction(ctx context.Context, sess *webSession, action ToolR
 		sess.appendAutonomousEvent(AutonomousEvent{Kind: "answer", Action: action.Action, Text: action.Text, EvidenceEventIDs: action.EvidenceEventIDs})
 		sess.appendAgentMessage(ChatMessage{Role: "assistant", Content: action.Text})
 		sess.mu.Lock()
+		sess.AutonomousRun.CandidateHistory = append(sess.AutonomousRun.CandidateHistory, action.Text)
 		sess.AwaitingDecision = true
 		sess.AutonomousRun.Status = autonomousWaitingApproval
 		sess.AutonomousRun.FinalAnswer = action.Text

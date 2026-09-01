@@ -118,7 +118,7 @@ The HTTP client creates context-aware requests, so cancellation propagates to Ol
 - Messages and stats.
 - Per-session auto-analysis flag.
 - Per-session thinking flag, default disabled.
-- An `AutonomousRun` snapshot with immutable prompt metadata, structured goal fields, detected environment capabilities, plan, compacted summary, status, limits, result, error, and sequenced events.
+- An `AutonomousRun` snapshot with immutable prompt metadata, structured goal fields, detected environment capabilities, plan, compacted summary, candidate history, cumulative user requirements, status, limits, result, error, and sequenced events.
 - A runtime-only cancellation function for the active autonomous worker.
 - Optional attachment metadata and temporary path.
 
@@ -276,11 +276,14 @@ Autonomous state management includes:
 - Semantic compaction of older events into a persisted summary, with a 768-token summary instruction budget.
 - Runtime detection of installed and unavailable allowlisted commands, operating system, and working directory.
 - Structured plans with evidence references and independent candidate-answer verification.
+- Explicit code-creation goals require a non-empty fenced code block before a candidate can reach critic review.
 - A maximum of 30 iterations and a 30-minute overall deadline.
 - Two-minute model-call and foreground-command deadlines.
 - Tool observations truncated to 32 KiB before entering model context.
 - Up to three consecutive protocol or model failures.
 - Critic-rejected candidate text and feedback are retained in model context; revisions are bounded by the overall iteration and run deadlines rather than the protocol-failure counter.
+- Critic-approved candidates and subsequent user-requested changes are retained as first-class revision context, independent of event compaction. Both the worker and critic receive this context, and revised answers are instructed to include the complete updated deliverable rather than refer to prior output.
+- Each critic pass receives current tool observations, user feedback, and plan evidence, but excludes prior critic verdicts and rejected-candidate events to prevent old judgments from biasing evaluation of a new candidate.
 - Strict single-object JSON decoding with unknown fields rejected.
 - A completion gate that requires an observation when the goal explicitly names an allowlisted command.
 - After an initial failed foreground command, only a corrected or alternative `run_command` action is accepted; after two command failures, a claimed impossibility still requires critic approval.

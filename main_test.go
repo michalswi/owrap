@@ -695,6 +695,96 @@ func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
 	}
 }
 
+func TestAutonomousRevisionContextPreservesCandidateAndRequestedChanges(t *testing.T) {
+	run := newAutonomousRun("session", "write a simple Go web server", defaultSystemPrompt, "default")
+	run.CandidateHistory = []string{"package main\n\nfunc main() { startServer() }"}
+	run.UserRequirements = []string{"add a health check endpoint", "add basic authentication with admin/admin"}
+	sess := &webSession{ID: "session", AutonomousRun: run}
+
+	messages, err := autonomousMessages(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, required := range []string{"package main", "add a health check endpoint", "add basic authentication with admin/admin", "complete updated deliverable"} {
+		if !strings.Contains(messages[0].Content, required) {
+			t.Fatalf("agent revision context missing %q: %s", required, messages[0].Content)
+		}
+	}
+
+	contextText := autonomousRevisionContext(run)
+	if !strings.Contains(contextText, "Candidate 1") || !strings.Contains(contextText, "User-requested changes") {
+		t.Fatalf("revision context omitted structured history: %s", contextText)
+	}
+
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		criticInput := request.Messages[1].Content
+		for _, required := range []string{"package main", "add a health check endpoint", "add basic authentication with admin/admin"} {
+			if !strings.Contains(criticInput, required) {
+				t.Errorf("critic revision context missing %q: %s", required, criticInput)
+			}
+		}
+		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: `{"approved":true,"feedback":"","evidenceEventIds":[]}`}})
+	}))
+	defer ollama.Close()
+	previousURL := ollamaURL
+	ollamaURL = ollama.URL
+	t.Cleanup(func() { ollamaURL = previousURL })
+	if _, err := verifyAutonomousAnswer(context.Background(), sess, "complete revised code"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAutonomousCodeGoalRejectsProseOnlyCandidate(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	responseActions := []ToolResponse{
+		{Action: "answer", Text: "Here is a simple Go web server example."},
+		{Action: "answer", Text: "Complete source:\n\n```go\npackage main\n\nfunc main() {}"},
+	}
+	agentCalls := 0
+	criticCalls := 0
+	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request ChatRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(request.Messages[0].Content, "You are an independent critic") {
+			criticCalls++
+			if strings.Contains(request.Messages[1].Content, `"kind":"verification"`) {
+				t.Error("critic received a prior verification verdict")
+			}
+			writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: `{"approved":true,"feedback":"","evidenceEventIds":[]}`}})
+			return
+		}
+		encoded, err := json.Marshal(responseActions[agentCalls])
+		if err != nil {
+			t.Fatal(err)
+		}
+		content := string(encoded)
+		agentCalls++
+		writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: content}})
+	}))
+	defer ollama.Close()
+
+	previousURL, previousStore := ollamaURL, webStore
+	ollamaURL, webStore = ollama.URL, newWebSessionStore()
+	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
+	sess := webStore.ensure("")
+	sess.AutonomousMode = true
+	sess.AutonomousRun = newAutonomousRun(sess.ID, "write app in golang - simple web server", defaultSystemPrompt, "default")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runAutonomousAgent(ctx, sess)
+
+	run := sess.autonomousSnapshot()
+	if run.Status != autonomousWaitingApproval || agentCalls != 2 || criticCalls != 1 || !strings.HasSuffix(run.FinalAnswer, "\n```") {
+		t.Fatalf("code deliverable gate failed: agents=%d critics=%d run=%+v", agentCalls, criticCalls, run)
+	}
+}
+
 func TestAutonomousLifecycleAPI(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

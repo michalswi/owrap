@@ -258,6 +258,7 @@ func handleAutonomousDecision(w http.ResponseWriter, r *http.Request) {
 		}
 		sess.appendAutonomousEvent(AutonomousEvent{Kind: "feedback", Text: feedback})
 		sess.mu.Lock()
+		sess.AutonomousRun.UserRequirements = append(sess.AutonomousRun.UserRequirements, feedback)
 		sess.AwaitingDecision = false
 		sess.AutonomousMode = true
 		sess.AutonomousRun.Status = autonomousRunning
