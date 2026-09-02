@@ -1344,6 +1344,7 @@
       let displayText = text;
       let apiText = text;
       let apiImage = null;
+      let apiAttachment = null;
       
       if (pendingFile && pendingFileEnabled) {
         const fileInfo = `[File: ${pendingFile.name}, Size: ${(pendingFile.size / 1024).toFixed(1)} KB]`;
@@ -1356,16 +1357,20 @@
           // Vision models need the actual base64 bytes, sent separately, not a text description.
           apiText = userPrompt;
           apiImage = { name: pendingFile.name, size: pendingFile.size, type: pendingFile.type, content: pendingFile.content };
+        } else if (pendingFile.kind === 'document') {
+          // PDF/DOCX/PPTX/DOC/PCAP: send raw base64, the server extracts readable text.
+          apiText = userPrompt;
+          apiAttachment = { name: pendingFile.name, size: pendingFile.size, type: pendingFile.type, content: pendingFile.content };
         } else {
           // For API: send prompt + file info + full content
           apiText = `${userPrompt}\n\n${fileInfo}\n\n${pendingFile.content}`;
         }
       }
       
-      await sendText(apiText, true, displayText, false, false, apiImage);
+      await sendText(apiText, true, displayText, false, false, apiImage, apiAttachment);
     }
 
-    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false, image = null) {
+    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false, image = null, attachment = null) {
       if (!text || isAutonomousActive) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
@@ -1385,7 +1390,7 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message: text, resumeAutonomous, image: image || undefined }),
+          body: JSON.stringify({ sessionId, message: text, resumeAutonomous, image: image || undefined, attachment: attachment || undefined }),
           signal: requestController.signal
         });
         const endTime = performance.now();
@@ -1857,10 +1862,13 @@
         
         try {
           const result = await readFileContent(file);
-          // Autonomous mode only gives the agent shell access to the saved file; it cannot view images.
-          const content = result.kind === 'image'
-            ? `[IMAGE FILE]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: Autonomous mode cannot analyze image content; use normal chat for image analysis.`
-            : result.content;
+          // Autonomous mode is unchanged: it only gets shell access to the saved file, never extracted text.
+          let content = result.content;
+          if (result.kind === 'image') {
+            content = `[IMAGE FILE]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: Autonomous mode cannot analyze image content; use normal chat for image analysis.`;
+          } else if (result.kind === 'document') {
+            content = `[BINARY FILE]\nFilename: ${file.name}\nType: ${file.type || 'unknown'}\nSize: ${file.size} bytes\n\nThis appears to be a binary file. Please extract text content or convert to a readable format first.`;
+          }
           autonomousFile = {
             name: file.name,
             size: file.size,
@@ -2259,6 +2267,14 @@
             resolve({ kind: 'image', content: base64 });
           };
           reader.onerror = () => reject(new Error('Failed to read image'));
+          reader.readAsDataURL(file);
+        } else if (['.pdf', '.docx', '.pptx', '.doc', '.pcap', '.pcapng', '.cap'].some(ext => file.name.toLowerCase().endsWith(ext))) {
+          reader.onload = (e) => {
+            // Server extracts readable text from the raw bytes (PDF/DOCX/PPTX/DOC/PCAP).
+            const base64 = e.target.result.split(',')[1];
+            resolve({ kind: 'document', content: base64 });
+          };
+          reader.onerror = () => reject(new Error('Failed to read file'));
           reader.readAsDataURL(file);
         } else {
           // For other binary files, provide metadata

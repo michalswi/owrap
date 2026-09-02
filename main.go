@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -313,6 +314,7 @@ type webChatRequest struct {
 	Message          string          `json:"message"`
 	ResumeAutonomous bool            `json:"resumeAutonomous,omitempty"`
 	Image            *FileAttachment `json:"image,omitempty"`
+	Attachment       *FileAttachment `json:"attachment,omitempty"` // non-image file (pdf/docx/pptx/doc/pcap); extracted server-side
 }
 
 type webChatResponse struct {
@@ -438,6 +440,37 @@ func (s *webSession) modelMessages() []ChatMessage {
 		return s.Messages[s.AutonomousStart:]
 	}
 	return s.Messages
+}
+
+// mergeAttachmentIntoMessage decodes a base64 file attachment, extracts readable text
+// server-side (PDF/DOCX/PPTX/DOC/PCAP or plain text), and folds it into the user message.
+func mergeAttachmentIntoMessage(message string, attachment *FileAttachment) string {
+	fileInfo := fmt.Sprintf("[File: %s, Size: %.1f KB]", attachment.Name, float64(attachment.Size)/1024)
+	if strings.TrimSpace(message) == "" {
+		message = "Please analyze this file."
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(attachment.Content)
+	if err != nil {
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to decode attachment: %v", message, fileInfo, err)
+	}
+
+	tmp, err := os.CreateTemp("", "owrap-attach-*"+strings.ToLower(filepath.Ext(attachment.Name)))
+	if err != nil {
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to stage attachment: %v", message, fileInfo, err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to stage attachment: %v", message, fileInfo, err)
+	}
+	tmp.Close()
+
+	extracted, err := ExtractTextFromFile(tmp.Name())
+	if err != nil {
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to extract file content: %v", message, fileInfo, err)
+	}
+	return fmt.Sprintf("%s\n\n%s\n\n%s", message, fileInfo, extracted)
 }
 
 func appendTerminalMessage(messages *[]ChatMessage, stats *Stats, role, content string) {
@@ -1366,6 +1399,9 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
+	}
+	if req.Attachment != nil && req.Attachment.Content != "" {
+		req.Message = mergeAttachmentIntoMessage(req.Message, req.Attachment)
 	}
 	sess.appendMessage("user", req.Message)
 	if req.Image != nil && strings.HasPrefix(req.Image.Type, "image/") && req.Image.Content != "" {
