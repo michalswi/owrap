@@ -25,9 +25,10 @@ import (
 )
 
 type ChatMessage struct {
-	Role     string `json:"role"`
-	Content  string `json:"content"`
-	Thinking string `json:"thinking,omitempty"`
+	Role     string   `json:"role"`
+	Content  string   `json:"content"`
+	Thinking string   `json:"thinking,omitempty"`
+	Images   []string `json:"images,omitempty"` // base64-encoded images for vision models
 }
 
 //go:embed webstatic/*
@@ -308,9 +309,10 @@ type ToolResponse struct {
 }
 
 type webChatRequest struct {
-	SessionID        string `json:"sessionId"`
-	Message          string `json:"message"`
-	ResumeAutonomous bool   `json:"resumeAutonomous,omitempty"`
+	SessionID        string          `json:"sessionId"`
+	Message          string          `json:"message"`
+	ResumeAutonomous bool            `json:"resumeAutonomous,omitempty"`
+	Image            *FileAttachment `json:"image,omitempty"`
 }
 
 type webChatResponse struct {
@@ -1366,6 +1368,13 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sess.appendMessage("user", req.Message)
+	if req.Image != nil && strings.HasPrefix(req.Image.Type, "image/") && req.Image.Content != "" {
+		sess.mu.Lock()
+		if len(sess.Messages) > 0 {
+			sess.Messages[len(sess.Messages)-1].Images = []string{req.Image.Content}
+		}
+		sess.mu.Unlock()
+	}
 
 	contextMessages := sess.modelMessages()
 	messages := make([]ChatMessage, 0, len(contextMessages)+1)

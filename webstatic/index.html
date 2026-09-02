@@ -1343,6 +1343,7 @@
       
       let displayText = text;
       let apiText = text;
+      let apiImage = null;
       
       if (pendingFile && pendingFileEnabled) {
         const fileInfo = `[File: ${pendingFile.name}, Size: ${(pendingFile.size / 1024).toFixed(1)} KB]`;
@@ -1351,15 +1352,20 @@
         // For display: show only prompt + file info
         displayText = `${userPrompt} ${fileInfo}`;
         
-        // For API: send prompt + file info + full content
-        apiText = `${userPrompt}\n\n${fileInfo}\n\n${pendingFile.content}`;
-        
+        if (pendingFile.kind === 'image') {
+          // Vision models need the actual base64 bytes, sent separately, not a text description.
+          apiText = userPrompt;
+          apiImage = { name: pendingFile.name, size: pendingFile.size, type: pendingFile.type, content: pendingFile.content };
+        } else {
+          // For API: send prompt + file info + full content
+          apiText = `${userPrompt}\n\n${fileInfo}\n\n${pendingFile.content}`;
+        }
       }
       
-      await sendText(apiText, true, displayText);
+      await sendText(apiText, true, displayText, false, false, apiImage);
     }
 
-    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false) {
+    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false, image = null) {
       if (!text || isAutonomousActive) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
@@ -1379,7 +1385,7 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message: text, resumeAutonomous }),
+          body: JSON.stringify({ sessionId, message: text, resumeAutonomous, image: image || undefined }),
           signal: requestController.signal
         });
         const endTime = performance.now();
@@ -1850,7 +1856,11 @@
         fileInfo.style.color = 'var(--accent-2)';
         
         try {
-          const content = await readFileContent(file);
+          const result = await readFileContent(file);
+          // Autonomous mode only gives the agent shell access to the saved file; it cannot view images.
+          const content = result.kind === 'image'
+            ? `[IMAGE FILE]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: Autonomous mode cannot analyze image content; use normal chat for image analysis.`
+            : result.content;
           autonomousFile = {
             name: file.name,
             size: file.size,
@@ -2209,12 +2219,13 @@
       if (!file) return;
       
       try {
-        const content = await readFileContent(file);
+        const result = await readFileContent(file);
         pendingFile = {
           name: file.name,
           size: file.size,
           type: file.type,
-          content: content
+          kind: result.kind,
+          content: result.content
         };
         pendingFileEnabled = true;
         updateAttachedFileUI();
@@ -2238,19 +2249,20 @@
         const isLikelyText = textExtensions.some(ext => file.name.toLowerCase().endsWith(ext));
         
         if (isLikelyText || file.type.startsWith('text/')) {
-          reader.onload = (e) => resolve(e.target.result);
+          reader.onload = (e) => resolve({ kind: 'text', content: e.target.result });
           reader.onerror = () => reject(new Error('Failed to read file'));
           reader.readAsText(file);
         } else if (file.type.startsWith('image/')) {
           reader.onload = (e) => {
+            // Keep the full base64 payload; vision models need the real bytes, not a preview.
             const base64 = e.target.result.split(',')[1];
-            resolve(`[IMAGE DATA - Base64 encoded]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: This is an image file. If using a vision model, the base64 data would be: ${base64.substring(0, 100)}...`);
+            resolve({ kind: 'image', content: base64 });
           };
           reader.onerror = () => reject(new Error('Failed to read image'));
           reader.readAsDataURL(file);
         } else {
           // For other binary files, provide metadata
-          resolve(`[BINARY FILE]\nFilename: ${file.name}\nType: ${file.type || 'unknown'}\nSize: ${file.size} bytes\n\nThis appears to be a binary file. Please extract text content or convert to a readable format first.`);
+          resolve({ kind: 'binary', content: `[BINARY FILE]\nFilename: ${file.name}\nType: ${file.type || 'unknown'}\nSize: ${file.size} bytes\n\nThis appears to be a binary file. Please extract text content or convert to a readable format first.` });
         }
       });
     }
