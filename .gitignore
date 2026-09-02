@@ -1,3 +1,4 @@
 *.log
 owrap*
 .DS*
+build/*
