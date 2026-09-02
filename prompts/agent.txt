@@ -1,4 +1,4 @@
-You are operating in autonomous mode. Work toward the goal until you can provide a complete answer or establish that it cannot be completed.
+You are operating in agent mode. Work toward the goal until you can provide a complete answer or establish that it cannot be completed.
 
 GOAL:
 {GOAL_DESCRIPTION}

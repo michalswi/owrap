@@ -179,14 +179,14 @@
       border-radius: 7px !important;
       font-size: 11px !important;
     }
-    #autonomousGoalBanner {
+    #agentGoalBanner {
       margin-bottom: 12px !important;
       padding: 12px 14px !important;
       background: rgba(10, 132, 255, 0.08) !important;
       border: 1px solid rgba(10, 132, 255, 0.28) !important;
       border-radius: 8px !important;
     }
-    #autonomousGoalBanner > div:first-child { margin-bottom: 0 !important; }
+    #agentGoalBanner > div:first-child { margin-bottom: 0 !important; }
     #activeJobsContainer { border-radius: 6px !important; }
     .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 14px; align-items: stretch; flex: 1; min-height: 0; }
     .conversation-column { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 14px; min-width: 0; min-height: 0; }
@@ -255,7 +255,7 @@
     }
     button:hover:not(:disabled) { background: rgba(10,132,255,0.1) !important; border-color: rgba(10,132,255,0.4); box-shadow: none; transform: translateY(-1px); }
     button:active:not(:disabled) { transform: translateY(0); }
-    #send, #saveSessionConfirm, #loadSessionConfirm, #saveCustomPrompt, #startAutonomousConfirm {
+    #send, #saveSessionConfirm, #loadSessionConfirm, #saveCustomPrompt, #startAgentConfirm {
       color: #fff;
       background: var(--accent-2) !important;
       border-color: var(--accent-2);
@@ -283,15 +283,15 @@
     .thinking-status.enabled::before { background: #28a745; box-shadow: 0 0 0 3px rgba(40,167,69,0.12); }
     .thinking-status.disabled { color: #8a5a00; background: rgba(255,204,102,0.12); border-color: rgba(229,173,61,0.3); }
     .thinking-status.disabled::before { background: #e5ad3d; box-shadow: 0 0 0 3px rgba(229,173,61,0.12); }
-    #autonomousStart { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
-    #autonomousStop { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #ff453a !important; border-color: #ff453a; }
-    .autonomous-decision { margin: 10px 0; padding: 10px; background: rgba(10,132,255,0.08); border: 1px solid rgba(10,132,255,0.28); border-radius: 6px; white-space: normal; }
-    .autonomous-decision-title { margin-bottom: 8px; color: var(--terminal-text); font-size: 12px; line-height: 1.5; }
-    .autonomous-decision textarea { width: 100%; min-height: 72px; margin: 0 0 8px; padding: 8px; resize: vertical; color: var(--terminal-text); background: var(--terminal-bg); border: 1px solid var(--border-color); border-radius: 4px; font: inherit; line-height: 1.4; box-sizing: border-box; }
-    .autonomous-decision-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
-    .autonomous-decision-actions button { min-height: 26px; padding: 4px 10px; font-size: 10px; }
-    .autonomous-decision .continue-work { color: #fff; background: #28a745 !important; border-color: #28a745; }
-    .autonomous-decision .end-loop { color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    #agentStart { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #5e5ce6 !important; border-color: #5e5ce6; }
+    #agentStop { grid-column: 1 / -1; width: 100%; align-items: center; justify-content: center; text-align: center; color: #fff; background: #ff453a !important; border-color: #ff453a; }
+    .agent-decision { margin: 10px 0; padding: 10px; background: rgba(10,132,255,0.08); border: 1px solid rgba(10,132,255,0.28); border-radius: 6px; white-space: normal; }
+    .agent-decision-title { margin-bottom: 8px; color: var(--terminal-text); font-size: 12px; line-height: 1.5; }
+    .agent-decision textarea { width: 100%; min-height: 72px; margin: 0 0 8px; padding: 8px; resize: vertical; color: var(--terminal-text); background: var(--terminal-bg); border: 1px solid var(--border-color); border-radius: 4px; font: inherit; line-height: 1.4; box-sizing: border-box; }
+    .agent-decision-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 7px; }
+    .agent-decision-actions button { min-height: 26px; padding: 4px 10px; font-size: 10px; }
+    .agent-decision .continue-work { color: #fff; background: #28a745 !important; border-color: #28a745; }
+    .agent-decision .end-loop { color: #fff; background: #ff453a !important; border-color: #ff453a; }
     .file-upload-btn { position: relative; overflow: hidden; display: flex; align-items: center; justify-content: center; gap: 5px; }
     .file-upload-btn input[type="file"] { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
     .info-icon { width: 15px; height: 15px; margin-left: 2px; color: var(--muted); background: rgba(128,128,128,0.14); font-size: 9px; }
@@ -567,13 +567,13 @@
   <main>
     <!-- <h2>owrapUI</h2> -->
 
-    <!-- Autonomous Mode Goal Display -->
-    <div id="autonomousGoalBanner" style="display: none; margin-bottom: 12px; padding: 12px 16px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(219, 39, 119, 0.15)); border: 2px solid rgba(236, 72, 153, 0.4); border-radius: 12px;">
+    <!-- Agent Mode Goal Display -->
+    <div id="agentGoalBanner" style="display: none; margin-bottom: 12px; padding: 12px 16px; background: linear-gradient(135deg, rgba(236, 72, 153, 0.15), rgba(219, 39, 119, 0.15)); border: 2px solid rgba(236, 72, 153, 0.4); border-radius: 12px;">
       <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 8px;">
         <span style="font-size: 20px;">🤖</span>
         <div style="flex: 1;">
-          <div style="font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 4px;">AUTONOMOUS MODE ACTIVE</div>
-          <div style="font-size: 13px; color: var(--text);"><strong>Goal:</strong> <span id="autonomousGoalText">-</span></div>
+          <div style="font-weight: 700; font-size: 14px; color: var(--accent); margin-bottom: 4px;">AGENT MODE ACTIVE</div>
+          <div style="font-size: 13px; color: var(--text);"><strong>Goal:</strong> <span id="agentGoalText">-</span></div>
         </div>
       </div>
       <!-- Active Jobs Display -->
@@ -651,8 +651,8 @@
               <button id="thinkOn" type="button">Thinking on</button>
               <button id="thinkOff" type="button">Thinking off</button>
               <div id="thinkingState" class="thinking-status disabled" role="status" aria-live="polite">Thinking disabled</div>
-              <button id="autonomousStart" type="button">Start autonomous</button>
-              <button id="autonomousStop" type="button" style="display: none;">Stop autonomous</button>
+              <button id="agentStart" type="button">Start agent</button>
+              <button id="agentStop" type="button" style="display: none;">Stop agent</button>
             </div>
           </div>
         </div>
@@ -727,8 +727,8 @@
     const thinkOnBtn = document.getElementById('thinkOn');
     const thinkOffBtn = document.getElementById('thinkOff');
     const thinkingStateEl = document.getElementById('thinkingState');
-    const autonomousStartBtn = document.getElementById('autonomousStart');
-    const autonomousStopBtn = document.getElementById('autonomousStop');
+    const agentStartBtn = document.getElementById('agentStart');
+    const agentStopBtn = document.getElementById('agentStop');
     const modelEl = document.getElementById('model');
     const promptEl = document.getElementById('prompt');
     const versionEl = document.getElementById('version');
@@ -750,8 +750,8 @@
     const fileNameDisplay = document.getElementById('fileName');
     const toggleAttachedFileBtn = document.getElementById('toggleAttachedFile');
     const fileUploadInfo = document.getElementById('fileUploadInfo');
-    const autonomousGoalBanner = document.getElementById('autonomousGoalBanner');
-    const autonomousGoalText = document.getElementById('autonomousGoalText');
+    const agentGoalBanner = document.getElementById('agentGoalBanner');
+    const agentGoalText = document.getElementById('agentGoalText');
     const activeJobsContainer = document.getElementById('activeJobsContainer');
     const activeJobsList = document.getElementById('activeJobsList');
     const statsEls = {
@@ -774,15 +774,15 @@
     let pendingFile = null;
     let pendingFileEnabled = false;
     let lastUserMessage = ''; // Track last user message for UI feedback
-    let isAutonomousActive = false; // Track if autonomous mode is currently running
+    let isAgentActive = false; // Track if agent mode is currently running
     let isRequestInProgress = false; // Track if a sendText request is in progress
     let activeRequestController = null;
     let stopRequested = false; // Track if user clicked /autostop
     let showStopMessageAfterResponse = false; // Track if we need to show stop message after response displays
     let restoredPromptName = ''; // Store the restored prompt name for display after response
-    let autonomousStatusTimer = null;
-    let lastAutonomousEventSequence = 0;
-    let lastAutonomousStatus = '';
+    let agentStatusTimer = null;
+    let lastAgentEventSequence = 0;
+    let lastAgentStatus = '';
     let thinkingEnabled = false;
 
     statsHeader.addEventListener('click', () => {
@@ -852,8 +852,8 @@
     autoOffBtn.addEventListener('click', () => sendText('/auto-off'));
     thinkOnBtn.addEventListener('click', () => sendText('/think-on'));
     thinkOffBtn.addEventListener('click', () => sendText('/think-off'));
-    autonomousStartBtn.addEventListener('click', showAutonomousStartDialog);
-    autonomousStopBtn.addEventListener('click', () => stopAutonomousMode('manual'));
+    agentStartBtn.addEventListener('click', showAgentStartDialog);
+    agentStopBtn.addEventListener('click', () => stopAgentMode('manual'));
     fileUploadInfo.addEventListener('click', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -861,7 +861,7 @@
     });
 
     function showMyPrompts() {
-      // Extract all user messages from the log, excluding autonomous mode messages
+      // Extract all user messages from the log, excluding agent mode messages
       const logLines = logEl.querySelectorAll('.log-line');
       const userPrompts = [];
       
@@ -1082,19 +1082,19 @@
         if (state.model) modelEl.textContent = `model: ${state.model}`;
         if (state.prompt) promptEl.textContent = `sys-prompt: ${state.prompt}`;
         setThinkingState(Boolean(state.thinking));
-        if (state.autonomousMode) {
-          isAutonomousActive = true;
-          autonomousGoalText.textContent = state.autonomousGoal || 'Active autonomous goal';
-          autonomousGoalBanner.style.display = 'block';
-          autonomousStartBtn.style.display = 'none';
-          autonomousStopBtn.style.display = 'inline-flex';
+        if (state.agentMode) {
+          isAgentActive = true;
+          agentGoalText.textContent = state.agentGoal || 'Active agent goal';
+          agentGoalBanner.style.display = 'block';
+          agentStartBtn.style.display = 'none';
+          agentStopBtn.style.display = 'inline-flex';
           disableAllButtons();
-          if (state.autonomousDecision) {
+          if (state.agentDecision) {
             appendSeparator();
             appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
-            appendAutonomousDecision();
+            appendAgentDecision();
           }
-          startAutonomousStatusPolling();
+          startAgentStatusPolling();
         }
         restoringState = false;
         saveState();
@@ -1337,7 +1337,7 @@
     }
 
     async function send() {
-      if (isAutonomousActive) return;
+      if (isAgentActive) return;
       let text = msgEl.value.trim();
       if (!text && !(pendingFile && pendingFileEnabled)) return;
       
@@ -1370,8 +1370,8 @@
       await sendText(apiText, true, displayText, false, false, apiImage, apiAttachment);
     }
 
-    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAutonomous = false, image = null, attachment = null) {
-      if (!text || isAutonomousActive) return;
+    async function sendText(text, fromInput = false, displayText = null, skipMyPrompts = false, resumeAgent = false, image = null, attachment = null) {
+      if (!text || isAgentActive) return;
       if (quickResponseTime) {
         quickResponseTime.style.display = 'none';
       }
@@ -1390,7 +1390,7 @@
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ sessionId, message: text, resumeAutonomous, image: image || undefined, attachment: attachment || undefined }),
+          body: JSON.stringify({ sessionId, message: text, resumeAgent, image: image || undefined, attachment: attachment || undefined }),
           signal: requestController.signal
         });
         const endTime = performance.now();
@@ -1437,12 +1437,12 @@
             const output = data.commandOutput || '(no output)';
             appendLine(output, 'command');
             
-            // Detect errors and show helpful message in autonomous mode
-            if (data.autonomousMode && (output.includes('Error running command') || output.includes('stderr:') || output.includes('exit status'))) {
+            // Detect errors and show helpful message in agent mode
+            if (data.agentMode && (output.includes('Error running command') || output.includes('stderr:') || output.includes('exit status'))) {
               appendLine('⚠️  Command failed, but agent will learn and try a different approach...', 'plain');
             }
             
-            // Display summary if present (autonomous mode generates summaries with 📝 emoji)
+            // Display summary if present (agent mode generates summaries with 📝 emoji)
             if (data.assistantText) {
               // Check for summary marker
               const summaryMarker = '📝';
@@ -1456,7 +1456,7 @@
                 }
               }
               
-              // Check for analysis marker (non-autonomous mode)
+              // Check for analysis marker (non-agent mode)
               const marker = '\n\nAnalysis:\n';
               const idx = data.assistantText.indexOf(marker);
               if (idx !== -1) {
@@ -1477,8 +1477,8 @@
             appendLine(`Assistant: ${data.assistantText}`, 'assistant');
           }
           
-          // Show command count in autonomous mode
-          if (data.autonomousMode && data.commandCount) {
+          // Show command count in agent mode
+          if (data.agentMode && data.commandCount) {
             const isReview = data.commandCount % 3 === 0;
             const countMsg = `📊 Commands executed: ${data.commandCount}${isReview ? ' (Goal review triggered)' : ''}`;
             appendLine(countMsg, 'plain');
@@ -1511,23 +1511,23 @@
             renderStats(data.stats);
           }
           
-          if (isAutonomousActive && data.autonomousDecision) {
+          if (isAgentActive && data.agentDecision) {
             appendSeparator();
             appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
-            appendAutonomousDecision();
-          } else if (isAutonomousActive && !data.autonomousMode && data.action === 'answer') {
-            // Agent provided final answer and stopped autonomous mode
+            appendAgentDecision();
+          } else if (isAgentActive && !data.agentMode && data.action === 'answer') {
+            // Agent provided final answer and stopped agent mode
             appendSeparator();
-            appendLine('🏁 Goal achieved! Autonomous mode stopped.', 'plain');
-            // Hide autonomous banner and trigger stop
-            autonomousGoalBanner.style.display = 'none';
-            autonomousStartBtn.style.display = 'inline-flex';
-            autonomousStopBtn.style.display = 'none';
-            isAutonomousActive = false; // Reset flag
+            appendLine('🏁 Goal achieved! Agent mode stopped.', 'plain');
+            // Hide agent banner and trigger stop
+            agentGoalBanner.style.display = 'none';
+            agentStartBtn.style.display = 'inline-flex';
+            agentStopBtn.style.display = 'none';
+            isAgentActive = false; // Reset flag
             enableAllButtons(); // Re-enable all buttons
-          } else if (data.autonomousMode && !data.autonomousContinue) {
+          } else if (data.agentMode && !data.agentContinue) {
             appendSeparator();
-            appendLine('🏁 Autonomous loop complete (max iterations reached or goal achieved)', 'plain');
+            appendLine('🏁 Agent loop complete (max iterations reached or goal achieved)', 'plain');
           }
         }
       } catch (e) {
@@ -1543,7 +1543,7 @@
         // Show stop message after response if stop was requested during this request
         if (showStopMessageAfterResponse) {
           appendSeparator();
-          appendLine('⏹️ Autonomous mode STOPPED', 'assistant');
+          appendLine('⏹️ Agent mode STOPPED', 'assistant');
           appendLine(`System prompt restored to: ${restoredPromptName}`, 'assistant');
           appendSeparator();
           showStopMessageAfterResponse = false;
@@ -1566,7 +1566,7 @@
     }
 
     function updateChatInputState() {
-      const chatDisabled = isAutonomousActive;
+      const chatDisabled = isAgentActive;
       msgEl.disabled = chatDisabled;
       msgEl.setAttribute('aria-disabled', chatDisabled.toString());
       sendBtn.disabled = chatDisabled || isRequestInProgress;
@@ -1607,23 +1607,23 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
-    function appendAutonomousDecision(mode = 'approval', question = '') {
-      logEl.querySelector('.autonomous-decision')?.remove();
+    function appendAgentDecision(mode = 'approval', question = '') {
+      logEl.querySelector('.agent-decision')?.remove();
       const needsClarification = mode === 'clarification';
       const title = needsClarification
         ? question || 'The agent needs clarification before it can continue.'
         : 'Review the candidate answer, then choose what the agent should do next.';
       logEl.insertAdjacentHTML('beforeend', `
-        <div class="autonomous-decision">
-          <div class="autonomous-decision-title">${escapeHtml(title)}</div>
+        <div class="agent-decision">
+          <div class="agent-decision-title">${escapeHtml(title)}</div>
           <textarea aria-label="${needsClarification ? 'Clarification' : 'Revision feedback'}" placeholder="${needsClarification ? 'Enter the information the agent needs' : 'Optional feedback for another attempt'}"></textarea>
-          <div class="autonomous-decision-actions">
+          <div class="agent-decision-actions">
             <button class="continue-work" type="button">${needsClarification ? 'Submit' : 'Continue working'}</button>
             ${needsClarification ? '' : '<button class="end-loop" type="button">End loop</button>'}
           </div>
         </div>`);
 
-      const decision = logEl.querySelector('.autonomous-decision');
+      const decision = logEl.querySelector('.agent-decision');
       const feedback = decision.querySelector('textarea');
       decision.querySelector('.continue-work').addEventListener('click', async () => {
         const value = feedback.value.trim();
@@ -1631,13 +1631,13 @@
           feedback.focus();
           return;
         }
-        const submitted = await submitAutonomousDecision('continue', value);
+        const submitted = await submitAgentDecision('continue', value);
         if (!submitted) return;
         decision.remove();
-        appendLine(needsClarification ? 'Clarification submitted.' : 'Continuing autonomous work...', 'plain');
+        appendLine(needsClarification ? 'Clarification submitted.' : 'Continuing agent work...', 'plain');
       });
       decision.querySelector('.end-loop')?.addEventListener('click', async () => {
-        const submitted = await submitAutonomousDecision('accept');
+        const submitted = await submitAgentDecision('accept');
         if (submitted) decision.remove();
       });
       logEl.scrollTop = logEl.scrollHeight;
@@ -1788,7 +1788,7 @@
       return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
     }
 
-    function showAutonomousStartDialog() {
+    function showAgentStartDialog() {
       const bodyHtml = `
         <div class="modal-subtitle">Define your goal - the agent will work continuously until it's done</div>
         
@@ -1819,32 +1819,32 @@
             <span id="autoFileInfo" style="font-size:12px; color:var(--muted);">No file selected</span>
             <input type="file" id="autoFileInput" accept="*/*" style="display:none;" />
           </div>
-          <div style="margin-top:6px; font-size:11px; color:var(--muted);">Useful for providing context, data, or reference material for the autonomous task</div>
+          <div style="margin-top:6px; font-size:11px; color:var(--muted);">Useful for providing context, data, or reference material for the agent task</div>
         </div>
         
         <div style="margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.12); border: 1px solid rgba(251, 191, 36, 0.35); border-radius: 8px; font-size: 12px; color: var(--muted);">
-          ⚠️ <strong>Autonomous Mode:</strong> Starting resets the system prompt to <strong>default</strong>. Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
+          ⚠️ <strong>Agent Mode:</strong> Starting resets the system prompt to <strong>default</strong>. Works best with larger models (more parameters). The agent works CONTINUOUSLY until the goal is fully achieved (auto-stops) or you manually stop it with /autostop. Can run background jobs and work in parallel.
         </div>
         
         <div style="margin-top: 16px; display: flex; gap: 10px;">
-          <button id="startAutonomousConfirm" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🚀 Start Autonomous Work</button>
-          <button id="startAutonomousCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
+          <button id="startAgentConfirm" type="button" style="background: linear-gradient(135deg, #ec4899, #db2777);">🚀 Start Agent Work</button>
+          <button id="startAgentCancel" type="button" style="background: linear-gradient(135deg, #6b7280, #4b5563);">Cancel</button>
         </div>
       `;
       
-      showModal('🤖 Start Autonomous Mode', bodyHtml);
+      showModal('🤖 Start Agent Mode', bodyHtml);
       
       const goalInput = document.getElementById('autoGoalInput');
       const expectedOutputInput = document.getElementById('autoExpectedOutput');
       const completionCriteriaInput = document.getElementById('autoCompletionCriteria');
       const constraintsInput = document.getElementById('autoConstraints');
-      const confirmBtn = document.getElementById('startAutonomousConfirm');
-      const cancelBtn = document.getElementById('startAutonomousCancel');
+      const confirmBtn = document.getElementById('startAgentConfirm');
+      const cancelBtn = document.getElementById('startAgentCancel');
       const fileUploadBtn = document.getElementById('autoFileUploadBtn');
       const fileInput = document.getElementById('autoFileInput');
       const fileInfo = document.getElementById('autoFileInfo');
       
-      let autonomousFile = null;
+      let agentFile = null;
       
       goalInput.focus();
       
@@ -1862,14 +1862,14 @@
         
         try {
           const result = await readFileContent(file);
-          // Autonomous mode is unchanged: it only gets shell access to the saved file, never extracted text.
+          // Agent mode is unchanged: it only gets shell access to the saved file, never extracted text.
           let content = result.content;
           if (result.kind === 'image') {
-            content = `[IMAGE FILE]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: Autonomous mode cannot analyze image content; use normal chat for image analysis.`;
+            content = `[IMAGE FILE]\nFilename: ${file.name}\nType: ${file.type}\nSize: ${file.size} bytes\n\nNote: Agent mode cannot analyze image content; use normal chat for image analysis.`;
           } else if (result.kind === 'document') {
             content = `[BINARY FILE]\nFilename: ${file.name}\nType: ${file.type || 'unknown'}\nSize: ${file.size} bytes\n\nThis appears to be a binary file. Please extract text content or convert to a readable format first.`;
           }
-          autonomousFile = {
+          agentFile = {
             name: file.name,
             size: file.size,
             type: file.type,
@@ -1882,7 +1882,7 @@
           console.error('Error reading file:', err);
           fileInfo.textContent = `❌ Error reading file: ${err.message}`;
           fileInfo.style.color = '#ef4444';
-          autonomousFile = null;
+          agentFile = null;
         }
       });
       
@@ -1895,7 +1895,7 @@
         }
         
         closeModal();
-        await startAutonomousMode(goal, autonomousFile, {
+        await startAgentMode(goal, agentFile, {
           expectedOutput: expectedOutputInput.value.trim(),
           completionCriteria: completionCriteriaInput.value.trim(),
           constraints: constraintsInput.value.trim()
@@ -1913,13 +1913,13 @@
       });
     }
 
-    async function startAutonomousMode(goal, file = null, goalSpec = {}) {
+    async function startAgentMode(goal, file = null, goalSpec = {}) {
       try {
         const requestBody = { sessionId, goal, ...goalSpec };
         
         // Include file if provided
         if (file) {
-          console.log('Sending file with autonomous start:', { name: file.name, size: file.size, hasContent: !!file.content });
+          console.log('Sending file with agent start:', { name: file.name, size: file.size, hasContent: !!file.content });
           requestBody.file = {
             name: file.name,
             size: file.size,
@@ -1927,10 +1927,10 @@
             content: file.content
           };
         } else {
-          console.log('No file attached to autonomous start');
+          console.log('No file attached to agent start');
         }
         
-        const res = await fetch('/api/autonomous/start', {
+        const res = await fetch('/api/agent/start', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody)
@@ -1939,57 +1939,57 @@
         const data = await res.json();
         
         if (!res.ok) {
-          appendLine(`❌ Failed to start autonomous mode: ${data.error || 'Unknown error'}`, 'error');
+          appendLine(`❌ Failed to start agent mode: ${data.error || 'Unknown error'}`, 'error');
           return;
         }
         
-        // CRITICAL: Update sessionId to match the one from autonomous start
+        // CRITICAL: Update sessionId to match the one from agent start
         sessionId = data.sessionId;
         sessionEl.textContent = `session: ${sessionId}`;
-        console.log('Autonomous mode started with sessionId:', sessionId);
+        console.log('Agent mode started with sessionId:', sessionId);
         
         // Store file path if file was attached
         const attachedFilePath = data.filePath || null;
         const attachedFileName = data.fileName || null;
         
         // Update UI
-        autonomousStartBtn.style.display = 'none';
-        autonomousStopBtn.style.display = 'inline-flex';
-        promptEl.textContent = `sys-prompt: ${(data.run && data.run.basePromptName) || 'selected'} + autonomous`;
-        isAutonomousActive = true; // Set flag
+        agentStartBtn.style.display = 'none';
+        agentStopBtn.style.display = 'inline-flex';
+        promptEl.textContent = `sys-prompt: ${(data.run && data.run.basePromptName) || 'selected'} + agent`;
+        isAgentActive = true; // Set flag
         disableAllButtons(); // Disable all other buttons
         stopRequested = false; // Reset stop flag
         
-        // Show and update autonomous goal banner
-        autonomousGoalBanner.style.display = 'block';
-        autonomousGoalText.textContent = goal;
+        // Show and update agent goal banner
+        agentGoalBanner.style.display = 'block';
+        agentGoalText.textContent = goal;
         
         appendSeparator();
-        appendLine('🤖 Autonomous mode ACTIVATED', 'assistant');
+        appendLine('🤖 Agent mode ACTIVATED', 'assistant');
         appendLine('System prompt reset to: default', 'assistant');
         appendLine(`Goal: ${goal}`, 'assistant');
         if (attachedFilePath) {
           appendLine(`📎 File available: ${attachedFileName} at ${attachedFilePath}`, 'assistant');
         }
         appendSeparator();
-        appendLine('💡 Starting autonomous work...', 'assistant');
+        appendLine('💡 Starting agent work...', 'assistant');
         appendSeparator();
         saveState();
         
-        lastAutonomousEventSequence = 0;
-        lastAutonomousStatus = '';
-        startAutonomousStatusPolling();
+        lastAgentEventSequence = 0;
+        lastAgentStatus = '';
+        startAgentStatusPolling();
         
       } catch (err) {
-        appendLine(`❌ Error starting autonomous mode: ${err.message}`, 'error');
+        appendLine(`❌ Error starting agent mode: ${err.message}`, 'error');
       }
     }
 
-    async function stopAutonomousMode(reason = 'manual') {
+    async function stopAgentMode(reason = 'manual') {
       try {
         stopRequested = true;
         
-        const res = await fetch('/api/autonomous/stop', {
+        const res = await fetch('/api/agent/stop', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId })
@@ -1998,7 +1998,7 @@
         const data = await res.json();
         
         if (!res.ok) {
-          appendLine(`❌ Failed to stop autonomous mode: ${data.error || 'Unknown error'}`, 'error');
+          appendLine(`❌ Failed to stop agent mode: ${data.error || 'Unknown error'}`, 'error');
           return;
         }
         
@@ -2006,21 +2006,21 @@
         restoredPromptName = data.prompt;
         
         // Update UI
-        autonomousStartBtn.style.display = 'inline-flex';
-        autonomousStopBtn.style.display = 'none';
-        autonomousGoalBanner.style.display = 'none';
-        isAutonomousActive = false; // Reset flag
+        agentStartBtn.style.display = 'inline-flex';
+        agentStopBtn.style.display = 'none';
+        agentGoalBanner.style.display = 'none';
+        isAgentActive = false; // Reset flag
         enableAllButtons(); // Re-enable all buttons
-        stopAutonomousStatusPolling();
+        stopAgentStatusPolling();
         
         // Only show stop message immediately if no request was in progress
         if (!showStopMessageAfterResponse) {
           appendSeparator();
           const stopMessage = reason === 'accepted'
-            ? 'Answer accepted. Autonomous loop ended.'
+            ? 'Answer accepted. Agent loop ended.'
             : reason === 'stalled'
-              ? 'Autonomous mode stopped because the agent could not continue.'
-              : '⏹️ Autonomous mode STOPPED';
+              ? 'Agent mode stopped because the agent could not continue.'
+              : '⏹️ Agent mode STOPPED';
           appendLine(stopMessage, 'assistant');
           appendLine(`System prompt restored to: ${data.prompt}`, 'assistant');
           appendSeparator();
@@ -2031,13 +2031,13 @@
         saveState();
         
       } catch (err) {
-        appendLine(`❌ Error stopping autonomous mode: ${err.message}`, 'error');
+        appendLine(`❌ Error stopping agent mode: ${err.message}`, 'error');
       }
     }
 
-    async function submitAutonomousDecision(decision, feedback = '') {
+    async function submitAgentDecision(decision, feedback = '') {
       try {
-        const response = await fetch('/api/autonomous/decision', {
+        const response = await fetch('/api/agent/decision', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sessionId, decision, feedback })
@@ -2045,47 +2045,47 @@
         if (!response.ok) throw new Error(`decision failed: ${response.status}`);
         const data = await response.json();
         if (decision === 'continue') {
-          isAutonomousActive = true;
+          isAgentActive = true;
           updateChatInputState();
-          lastAutonomousStatus = '';
-          startAutonomousStatusPolling();
+          lastAgentStatus = '';
+          startAgentStatusPolling();
         } else {
-          completeAutonomousUI('Answer accepted. Autonomous run completed.');
+          completeAgentUI('Answer accepted. Agent run completed.');
         }
         return data;
       } catch (error) {
-        appendLine(`Autonomous decision failed: ${error.message}`, 'error');
+        appendLine(`Agent decision failed: ${error.message}`, 'error');
         return null;
       }
     }
 
-    function startAutonomousStatusPolling() {
-      stopAutonomousStatusPolling();
+    function startAgentStatusPolling() {
+      stopAgentStatusPolling();
       const poll = async () => {
         try {
-          const response = await fetch(`/api/autonomous/status?sessionId=${encodeURIComponent(sessionId)}`);
+          const response = await fetch(`/api/agent/status?sessionId=${encodeURIComponent(sessionId)}`);
           if (!response.ok) throw new Error(`status ${response.status}`);
           const data = await response.json();
           if (data.stats) renderStats(data.stats);
-          renderAutonomousRun(data.run);
+          renderAgentRun(data.run);
         } catch (error) {
-          console.warn('Autonomous status polling failed:', error);
+          console.warn('Agent status polling failed:', error);
         }
-        if (isAutonomousActive) autonomousStatusTimer = setTimeout(poll, 1000);
+        if (isAgentActive) agentStatusTimer = setTimeout(poll, 1000);
       };
       poll();
     }
 
-    function stopAutonomousStatusPolling() {
-      if (autonomousStatusTimer) clearTimeout(autonomousStatusTimer);
-      autonomousStatusTimer = null;
+    function stopAgentStatusPolling() {
+      if (agentStatusTimer) clearTimeout(agentStatusTimer);
+      agentStatusTimer = null;
     }
 
-    function renderAutonomousRun(run) {
+    function renderAgentRun(run) {
       if (!run) return;
       for (const event of run.events || []) {
-        if (event.sequence <= lastAutonomousEventSequence) continue;
-        lastAutonomousEventSequence = event.sequence;
+        if (event.sequence <= lastAgentEventSequence) continue;
+        lastAgentEventSequence = event.sequence;
         if (event.kind === 'action' && event.action === 'run_command') {
           appendLine(`Assistant [Running]: ${event.command}`, 'assistant');
         } else if (event.kind === 'action' && event.action === 'answer') {
@@ -2095,7 +2095,7 @@
           if (event.text) appendLine(event.text, 'plain');
           if (event.output) appendLine(event.output, 'command');
         } else if (event.kind === 'plan') {
-          appendLine(event.text || 'Autonomous plan updated.', 'plain');
+          appendLine(event.text || 'Agent plan updated.', 'plain');
         } else if (event.kind === 'verification') {
           appendLine(`Revision required: ${event.text}`, 'plain');
         } else if (event.kind === 'clarification') {
@@ -2103,32 +2103,32 @@
         } else if (event.kind === 'feedback') {
           appendLine(`User: ${event.text}`, 'user');
         } else if (event.kind === 'error' || event.kind === 'invalid_action') {
-          appendLine(event.text || 'Autonomous action failed.', 'error');
+          appendLine(event.text || 'Agent action failed.', 'error');
         }
       }
 
-      if (run.status === lastAutonomousStatus) return;
-      lastAutonomousStatus = run.status;
+      if (run.status === lastAgentStatus) return;
+      lastAgentStatus = run.status;
       if (run.status === 'waiting_approval') {
         appendSeparator();
         appendLine('Candidate answer ready. Is this result satisfactory?', 'plain');
-        appendAutonomousDecision();
+        appendAgentDecision();
       } else if (run.status === 'waiting_input') {
         const clarification = [...(run.events || [])].reverse().find(event => event.kind === 'clarification');
         appendSeparator();
-        appendAutonomousDecision('clarification', clarification?.text || 'The agent needs clarification before it can continue.');
+        appendAgentDecision('clarification', clarification?.text || 'The agent needs clarification before it can continue.');
       } else if (['completed', 'failed', 'cancelled', 'limit_reached'].includes(run.status)) {
-        const detail = run.error ? `${run.status}: ${run.error}` : `Autonomous run ${run.status}.`;
-        completeAutonomousUI(detail);
+        const detail = run.error ? `${run.status}: ${run.error}` : `Agent run ${run.status}.`;
+        completeAgentUI(detail);
       }
     }
 
-    function completeAutonomousUI(message) {
-      stopAutonomousStatusPolling();
-      isAutonomousActive = false;
-      autonomousGoalBanner.style.display = 'none';
-      autonomousStartBtn.style.display = 'inline-flex';
-      autonomousStopBtn.style.display = 'none';
+    function completeAgentUI(message) {
+      stopAgentStatusPolling();
+      isAgentActive = false;
+      agentGoalBanner.style.display = 'none';
+      agentStartBtn.style.display = 'inline-flex';
+      agentStopBtn.style.display = 'none';
       enableAllButtons();
       appendSeparator();
       appendLine(message, 'plain');

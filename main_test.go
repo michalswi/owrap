@@ -38,7 +38,7 @@ func TestWebSessionAppendMessageUpdatesStatsAndContext(t *testing.T) {
 	}
 }
 
-func writeAutonomousCriticApproval(w http.ResponseWriter, r *http.Request) bool {
+func writeAgentCriticApproval(w http.ResponseWriter, r *http.Request) bool {
 	var request ChatRequest
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil || len(request.Messages) == 0 {
 		return false
@@ -50,7 +50,7 @@ func writeAutonomousCriticApproval(w http.ResponseWriter, r *http.Request) bool 
 	if len(request.Messages) > 1 {
 		const marker = "RECORDED EVENTS:\n"
 		if index := strings.Index(request.Messages[1].Content, marker); index >= 0 {
-			var events []AutonomousEvent
+			var events []AgentEvent
 			if json.Unmarshal([]byte(request.Messages[1].Content[index+len(marker):]), &events) == nil {
 				for _, event := range events {
 					if event.Kind == "observation" && event.Success {
@@ -60,7 +60,7 @@ func writeAutonomousCriticApproval(w http.ResponseWriter, r *http.Request) bool 
 			}
 		}
 	}
-	verification, _ := json.Marshal(AutonomousVerification{Approved: true, EvidenceEventIDs: evidenceIDs})
+	verification, _ := json.Marshal(AgentVerification{Approved: true, EvidenceEventIDs: evidenceIDs})
 	writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: string(verification)}})
 	return true
 }
@@ -219,17 +219,17 @@ func TestHandleWebChatCountsRawReplyAndCommandOutput(t *testing.T) {
 	}
 }
 
-func TestAutonomousFailureMessagesAreCounted(t *testing.T) {
+func TestAgentFailureMessagesAreCounted(t *testing.T) {
 	previousPrompt := systemPrompt
-	systemPrompt = "autonomous"
+	systemPrompt = "agent"
 	t.Cleanup(func() { systemPrompt = previousPrompt })
 
-	sess := &webSession{AutonomousMode: true, RetryCount: 2}
-	response := handleAutonomousJSONError(sess, "invalid", "invalid", nil)
+	sess := &webSession{AgentMode: true, RetryCount: 2}
+	response := handleAgentJSONError(sess, "invalid", "invalid", nil)
 	if response.Stats.AssistantMessages != 2 {
 		t.Fatalf("AssistantMessages = %d, want 2", response.Stats.AssistantMessages)
 	}
-	if !response.AutonomousStop || !sess.AutonomousMode || response.AutonomousContinue {
+	if !response.AgentStop || !sess.AgentMode || response.AgentContinue {
 		t.Fatalf("retry exhaustion did not request normal stop cleanup: session=%+v response=%+v", sess, response)
 	}
 	if len(sess.Messages) != 2 {
@@ -237,9 +237,9 @@ func TestAutonomousFailureMessagesAreCounted(t *testing.T) {
 	}
 }
 
-func TestAutonomousInternalPromptOnlyUpdatesContext(t *testing.T) {
+func TestAgentInternalPromptOnlyUpdatesContext(t *testing.T) {
 	previousPrompt := systemPrompt
-	systemPrompt = "autonomous"
+	systemPrompt = "agent"
 	t.Cleanup(func() { systemPrompt = previousPrompt })
 
 	sess := &webSession{}
@@ -247,13 +247,13 @@ func TestAutonomousInternalPromptOnlyUpdatesContext(t *testing.T) {
 	if sess.Stats.UserMessages != 0 || sess.Stats.TotalUserChars != 0 {
 		t.Fatalf("internal prompt changed user stats: %+v", sess.Stats)
 	}
-	if sess.Stats.ContextChars != len("autonomouscontinue internally") {
+	if sess.Stats.ContextChars != len("agentcontinue internally") {
 		t.Fatalf("internal prompt missing from context: %+v", sess.Stats)
 	}
 }
 
-func TestComposeAutonomousPromptPreservesSelectedPrompt(t *testing.T) {
-	prompt, err := composeAutonomousPrompt(
+func TestComposeAgentPromptPreservesSelectedPrompt(t *testing.T) {
+	prompt, err := composeAgentPrompt(
 		"You are a concise philosophy assistant.",
 		"Who is God? Short answer.",
 		"No previous attempts yet.",
@@ -272,54 +272,54 @@ func TestComposeAutonomousPromptPreservesSelectedPrompt(t *testing.T) {
 	}
 }
 
-func TestAutonomousRunExcludesEarlierMessages(t *testing.T) {
+func TestAgentRunExcludesEarlierMessages(t *testing.T) {
 	sess := &webSession{
 		Messages: []ChatMessage{
-			{Role: "user", Content: "old autonomous goal"},
-			{Role: "assistant", Content: "old autonomous result"},
-			{Role: "user", Content: "new autonomous goal"},
+			{Role: "user", Content: "old agent goal"},
+			{Role: "assistant", Content: "old agent result"},
+			{Role: "user", Content: "new agent goal"},
 		},
-		AutonomousMode:  true,
-		AutonomousStart: 2,
+		AgentMode:  true,
+		AgentStart: 2,
 	}
 
 	messages := sess.modelMessages()
-	if len(messages) != 1 || messages[0].Content != "new autonomous goal" {
-		t.Fatalf("autonomous model context contains earlier messages: %+v", messages)
+	if len(messages) != 1 || messages[0].Content != "new agent goal" {
+		t.Fatalf("agent model context contains earlier messages: %+v", messages)
 	}
 	history := buildIterationHistory(sess)
-	if strings.Contains(history, "old autonomous") || !strings.Contains(history, "new autonomous goal") {
-		t.Fatalf("autonomous iteration history crossed run boundary: %q", history)
+	if strings.Contains(history, "old agent") || !strings.Contains(history, "new agent goal") {
+		t.Fatalf("agent iteration history crossed run boundary: %q", history)
 	}
 }
 
-func TestAutonomousAnswerWaitsForUserDecision(t *testing.T) {
+func TestAgentAnswerWaitsForUserDecision(t *testing.T) {
 	previousPrompt, previousPromptName := systemPrompt, systemPromptName
-	systemPrompt, systemPromptName = "autonomous prompt", "autonomous_agent.txt"
+	systemPrompt, systemPromptName = "agent prompt", "agent.txt"
 	t.Cleanup(func() { systemPrompt, systemPromptName = previousPrompt, previousPromptName })
 
 	sess := &webSession{
-		AutonomousMode:     true,
-		AutonomousGoal:     "finish the report",
+		AgentMode:          true,
+		AgentGoal:          "finish the report",
 		OriginalPrompt:     "original prompt",
 		OriginalPromptName: "default",
 	}
-	response := handleAutonomousAnswer(sess, ToolResponse{Action: "answer", Text: "candidate answer"})
+	response := handleAgentAnswer(sess, ToolResponse{Action: "answer", Text: "candidate answer"})
 
-	if !sess.AutonomousMode || !sess.AwaitingDecision || !response.AutonomousMode || !response.AutonomousDecision {
-		t.Fatalf("autonomous mode did not pause for a decision: session=%+v response=%+v", sess, response)
+	if !sess.AgentMode || !sess.AwaitingDecision || !response.AgentMode || !response.AgentDecision {
+		t.Fatalf("agent mode did not pause for a decision: session=%+v response=%+v", sess, response)
 	}
-	if response.AutonomousContinue {
+	if response.AgentContinue {
 		t.Fatal("candidate answer should not auto-continue")
 	}
-	if systemPrompt != "autonomous prompt" || systemPromptName != "autonomous_agent.txt" {
-		t.Fatal("autonomous prompt was restored before the user ended the loop")
+	if systemPrompt != "agent prompt" || systemPromptName != "agent.txt" {
+		t.Fatal("agent prompt was restored before the user ended the loop")
 	}
 }
 
-func TestAutonomousChatRejectedWhileRunActive(t *testing.T) {
+func TestAgentChatRejectedWhileRunActive(t *testing.T) {
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
+	sess.AgentMode = true
 	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"message":"next step"}`, sess.ID))
 	response := httptest.NewRecorder()
 	handleWebChat(response, httptest.NewRequest(http.MethodPost, "/api/chat", body))
@@ -328,7 +328,7 @@ func TestAutonomousChatRejectedWhileRunActive(t *testing.T) {
 	}
 }
 
-func TestBackendAutonomousRunExecutesUntilAnswer(t *testing.T) {
+func TestBackendAgentRunExecutesUntilAnswer(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{
 		`{"action":"run_command","command":"echo worker-owned"}`,
@@ -336,7 +336,7 @@ func TestBackendAutonomousRunExecutesUntilAnswer(t *testing.T) {
 	}
 	responseIndex := 0
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeAutonomousCriticApproval(w, r) {
+		if writeAgentCriticApproval(w, r) {
 			return
 		}
 		content := responses[responseIndex]
@@ -350,14 +350,14 @@ func TestBackendAutonomousRunExecutesUntilAnswer(t *testing.T) {
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "run a command and answer", "You are concise.", "test")
+	sess.AgentMode = true
+	sess.AgentRun = newAgentRun(sess.ID, "run a command and answer", "You are concise.", "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runAutonomousAgent(ctx, sess)
+	runAgent(ctx, sess)
 
-	run := sess.autonomousSnapshot()
-	if responseIndex != 2 || run.Status != autonomousWaitingApproval || run.FinalAnswer != "finished without browser input" {
+	run := sess.agentSnapshot()
+	if responseIndex != 2 || run.Status != agentWaitingApproval || run.FinalAnswer != "finished without browser input" {
 		t.Fatalf("backend run did not reach answer: calls=%d run=%+v", responseIndex, run)
 	}
 	foundOutput := false
@@ -371,7 +371,7 @@ func TestBackendAutonomousRunExecutesUntilAnswer(t *testing.T) {
 	}
 }
 
-func TestBackendAutonomousRunContinuesAfterMissingJob(t *testing.T) {
+func TestBackendAgentRunContinuesAfterMissingJob(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{
 		`{"action":"check_job","jobId":"missing-job"}`,
@@ -379,7 +379,7 @@ func TestBackendAutonomousRunContinuesAfterMissingJob(t *testing.T) {
 	}
 	responseIndex := 0
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeAutonomousCriticApproval(w, r) {
+		if writeAgentCriticApproval(w, r) {
 			return
 		}
 		content := responses[responseIndex]
@@ -393,17 +393,17 @@ func TestBackendAutonomousRunContinuesAfterMissingJob(t *testing.T) {
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "recover", "You are concise.", "test")
+	sess.AgentMode = true
+	sess.AgentRun = newAgentRun(sess.ID, "recover", "You are concise.", "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runAutonomousAgent(ctx, sess)
-	if run := sess.autonomousSnapshot(); responseIndex != 2 || run.Status != autonomousWaitingApproval || run.FinalAnswer != "recovered" {
+	runAgent(ctx, sess)
+	if run := sess.agentSnapshot(); responseIndex != 2 || run.Status != agentWaitingApproval || run.FinalAnswer != "recovered" {
 		t.Fatalf("missing job stopped backend run: calls=%d run=%+v", responseIndex, run)
 	}
 }
 
-func TestBackendAutonomousRunStopsAfterProtocolFailures(t *testing.T) {
+func TestBackendAgentRunStopsAfterProtocolFailures(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{"not json", `{"action":"unknown"}`, "still not json"}
 	responseIndex := 0
@@ -419,33 +419,33 @@ func TestBackendAutonomousRunStopsAfterProtocolFailures(t *testing.T) {
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "fail safely", "You are concise.", "test")
+	sess.AgentMode = true
+	sess.AgentRun = newAgentRun(sess.ID, "fail safely", "You are concise.", "test")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runAutonomousAgent(ctx, sess)
-	if run := sess.autonomousSnapshot(); responseIndex != 3 || run.Status != autonomousFailed || run.ConsecutiveErrors != 3 {
+	runAgent(ctx, sess)
+	if run := sess.agentSnapshot(); responseIndex != 3 || run.Status != agentFailed || run.ConsecutiveErrors != 3 {
 		t.Fatalf("protocol failures were not bounded: calls=%d run=%+v", responseIndex, run)
 	}
 }
 
-func TestAutonomousCommandValidationRejectsNestedExecution(t *testing.T) {
+func TestAgentCommandValidationRejectsNestedExecution(t *testing.T) {
 	for _, command := range []string{"echo $(touch hidden)", "echo `touch hidden`", "echo ok; rm file"} {
-		if err := validateAutonomousCommand(command); err == nil {
-			t.Fatalf("command %q bypassed autonomous allowlist", command)
+		if err := validateAgentCommand(command); err == nil {
+			t.Fatalf("command %q bypassed agent allowlist", command)
 		}
 	}
-	if err := validateAutonomousCommand("echo hello | grep hello"); err != nil {
+	if err := validateAgentCommand("echo hello | grep hello"); err != nil {
 		t.Fatalf("valid allowlisted pipeline rejected: %v", err)
 	}
-	err := validateAutonomousCommand("/bin/ping -c 5 google.com")
+	err := validateAgentCommand("/bin/ping -c 5 google.com")
 	if err == nil || !strings.Contains(err.Error(), `bare allowlisted name "ping"`) {
 		t.Fatalf("path-qualified command returned unhelpful error: %v", err)
 	}
 }
 
 func TestFailedCommandDoesNotSatisfyExecutionRequirement(t *testing.T) {
-	events := []AutonomousEvent{{
+	events := []AgentEvent{{
 		Kind:    "observation",
 		Action:  "run_command",
 		Command: "ping invalid 5x",
@@ -461,7 +461,7 @@ func TestFailedCommandDoesNotSatisfyExecutionRequirement(t *testing.T) {
 	}
 }
 
-func TestBackendAutonomousRunRetriesCommandAfterFailedExecution(t *testing.T) {
+func TestBackendAgentRunRetriesCommandAfterFailedExecution(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{
 		`{"action":"run_command","command":"sh -c 'exit 1'"}`,
@@ -492,38 +492,38 @@ func TestBackendAutonomousRunRetriesCommandAfterFailedExecution(t *testing.T) {
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "execute a check and report", defaultSystemPrompt, "default")
+	sess.AgentMode = true
+	sess.AgentRun = newAgentRun(sess.ID, "execute a check and report", defaultSystemPrompt, "default")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runAutonomousAgent(ctx, sess)
+	runAgent(ctx, sess)
 
-	run := sess.autonomousSnapshot()
-	if run.Status != autonomousWaitingApproval || run.FinalAnswer != "completed after retry" || responseIndex != 4 || criticCalls != 1 {
+	run := sess.agentSnapshot()
+	if run.Status != agentWaitingApproval || run.FinalAnswer != "completed after retry" || responseIndex != 4 || criticCalls != 1 {
 		t.Fatalf("failed command recovery did not complete: responses=%d critics=%d run=%+v", responseIndex, criticCalls, run)
 	}
 	if sess.PartialFindings != "" {
 		t.Fatalf("non-command action bypassed recovery requirement: %q", sess.PartialFindings)
 	}
-	if command, failed := latestAutonomousCommandFailure(run.Events); failed || command != "echo recovered" {
+	if command, failed := latestAgentCommandFailure(run.Events); failed || command != "echo recovered" {
 		t.Fatalf("latest command failure state was not cleared: command=%q failed=%v", command, failed)
 	}
 }
 
-func TestAutonomousMessagesIncludeAllowedCommandNames(t *testing.T) {
+func TestAgentMessagesIncludeAllowedCommandNames(t *testing.T) {
 	sess := &webSession{ID: "session"}
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "ping once", defaultSystemPrompt, "default")
-	messages, err := autonomousMessages(sess)
+	sess.AgentRun = newAgentRun(sess.ID, "ping once", defaultSystemPrompt, "default")
+	messages, err := agentMessages(sess)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(messages[0].Content, "EXECUTION ENVIRONMENT") || !strings.Contains(messages[0].Content, "Commands installed and allowed") {
-		t.Fatalf("autonomous prompt omitted command allowlist: %q", messages[0].Content)
+		t.Fatalf("agent prompt omitted command allowlist: %q", messages[0].Content)
 	}
 }
 
-func TestAutonomousRunDetectsEnvironmentCapabilities(t *testing.T) {
-	run := newAutonomousRun("session", "inspect environment", defaultSystemPrompt, "default")
+func TestAgentRunDetectsEnvironmentCapabilities(t *testing.T) {
+	run := newAgentRun("session", "inspect environment", defaultSystemPrompt, "default")
 	if run.OperatingSystem == "" || run.WorkingDirectory == "" {
 		t.Fatalf("execution environment was not captured: %+v", run)
 	}
@@ -532,16 +532,16 @@ func TestAutonomousRunDetectsEnvironmentCapabilities(t *testing.T) {
 	}
 }
 
-func TestAutonomousMessagesIncludeStructuredGoal(t *testing.T) {
+func TestAgentMessagesIncludeStructuredGoal(t *testing.T) {
 	sess := &webSession{ID: "session"}
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "inspect service", defaultSystemPrompt, "default")
-	sess.AutonomousRun.GoalSpec = normalizeAutonomousGoalSpec(AutonomousGoalSpec{
+	sess.AgentRun = newAgentRun(sess.ID, "inspect service", defaultSystemPrompt, "default")
+	sess.AgentRun.GoalSpec = normalizeAgentGoalSpec(AgentGoalSpec{
 		Objective:          "Inspect service health",
 		ExpectedOutput:     "A health report",
 		Constraints:        "Read-only commands",
 		CompletionCriteria: "Health and latency are reported",
 	})
-	messages, err := autonomousMessages(sess)
+	messages, err := agentMessages(sess)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,12 +552,12 @@ func TestAutonomousMessagesIncludeStructuredGoal(t *testing.T) {
 	}
 }
 
-func TestAutonomousContextSelectionUsesTokenBudget(t *testing.T) {
-	events := make([]AutonomousEvent, 10)
+func TestAgentContextSelectionUsesTokenBudget(t *testing.T) {
+	events := make([]AgentEvent, 10)
 	for index := range events {
-		events[index] = AutonomousEvent{Sequence: index + 1, Kind: "observation", Output: strings.Repeat("x", 80)}
+		events[index] = AgentEvent{Sequence: index + 1, Kind: "observation", Output: strings.Repeat("x", 80)}
 	}
-	selected := selectAutonomousContextEvents(events, 0, 70)
+	selected := selectAgentContextEvents(events, 0, 70)
 	if len(selected) == 0 || len(selected) >= len(events) {
 		t.Fatalf("token budget did not compact context: selected=%d", len(selected))
 	}
@@ -566,38 +566,38 @@ func TestAutonomousContextSelectionUsesTokenBudget(t *testing.T) {
 	}
 }
 
-func TestAutonomousJobActionRequiresRunOwnedJob(t *testing.T) {
-	run := newAutonomousRun("session", "inspect a job", defaultSystemPrompt, "default")
+func TestAgentJobActionRequiresRunOwnedJob(t *testing.T) {
+	run := newAgentRun("session", "inspect a job", defaultSystemPrompt, "default")
 	sess := &webSession{ID: "session"}
 	action := ToolResponse{Action: "check_job", JobID: "invented"}
-	if err := validateAutonomousActionState(sess, run, action); err == nil || !strings.Contains(err.Error(), "was not created by this run") {
+	if err := validateAgentActionState(sess, run, action); err == nil || !strings.Contains(err.Error(), "was not created by this run") {
 		t.Fatalf("invented job ID was not rejected: %v", err)
 	}
 }
 
-func TestAutonomousPlanLifecycle(t *testing.T) {
+func TestAgentPlanLifecycle(t *testing.T) {
 	sess := &webSession{ID: "session"}
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "inspect two services", defaultSystemPrompt, "default")
-	if !executeAutonomousAction(context.Background(), sess, ToolResponse{Action: "create_plan", Steps: []string{"Inspect first", "Inspect second"}}) {
+	sess.AgentRun = newAgentRun(sess.ID, "inspect two services", defaultSystemPrompt, "default")
+	if !executeAgentAction(context.Background(), sess, ToolResponse{Action: "create_plan", Steps: []string{"Inspect first", "Inspect second"}}) {
 		t.Fatal("create_plan stopped the run")
 	}
-	run := sess.autonomousSnapshot()
+	run := sess.agentSnapshot()
 	if len(run.Plan) != 2 || run.Plan[0].Status != "pending" {
 		t.Fatalf("plan was not created: %+v", run.Plan)
 	}
-	sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: "run_command", Success: true})
-	run = sess.autonomousSnapshot()
+	sess.appendAgentEvent(AgentEvent{Kind: "observation", Action: "run_command", Success: true})
+	run = sess.agentSnapshot()
 	action := ToolResponse{Action: "complete_step", StepID: 1, EvidenceEventIDs: []int{2}}
-	if err := validateAutonomousActionState(sess, run, action); err != nil {
+	if err := validateAgentActionState(sess, run, action); err != nil {
 		t.Fatal(err)
 	}
-	executeAutonomousAction(context.Background(), sess, action)
-	if step := sess.autonomousSnapshot().Plan[0]; step.Status != "completed" || len(step.EvidenceEventIDs) != 1 {
+	executeAgentAction(context.Background(), sess, action)
+	if step := sess.agentSnapshot().Plan[0]; step.Status != "completed" || len(step.EvidenceEventIDs) != 1 {
 		t.Fatalf("plan step was not completed with evidence: %+v", step)
 	}
 }
 
-func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
+func TestBackendAgentRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responses := []string{
 		`{"action":"answer","text":"No command was performed."}`,
@@ -606,7 +606,7 @@ func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
 	}
 	var requestCount int
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeAutonomousCriticApproval(w, r) {
+		if writeAgentCriticApproval(w, r) {
 			return
 		}
 		response := responses[requestCount]
@@ -620,15 +620,15 @@ func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
 
 	webStore = newWebSessionStore()
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "use echo to produce measured output", defaultSystemPrompt, "default")
-	ctx, cancel := autonomousRunContext()
+	sess.AgentMode = true
+	sess.AgentRun = newAgentRun(sess.ID, "use echo to produce measured output", defaultSystemPrompt, "default")
+	ctx, cancel := agentRunContext()
 	defer cancel()
-	runAutonomousAgent(ctx, sess)
+	runAgent(ctx, sess)
 
-	run := sess.autonomousSnapshot()
-	if run.Status != autonomousWaitingApproval {
-		t.Fatalf("status = %q, want %q (error: %s)", run.Status, autonomousWaitingApproval, run.Error)
+	run := sess.agentSnapshot()
+	if run.Status != agentWaitingApproval {
+		t.Fatalf("status = %q, want %q (error: %s)", run.Status, agentWaitingApproval, run.Error)
 	}
 	if requestCount != 3 {
 		t.Fatalf("model requests = %d, want 3", requestCount)
@@ -641,7 +641,7 @@ func TestBackendAutonomousRunRejectsAnswerBeforeRequiredCommand(t *testing.T) {
 	}
 }
 
-func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
+func TestBackendAgentRunRevisesCriticRejectedAnswer(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	var agentCalls, criticCalls int
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -657,7 +657,7 @@ func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
 			if !approved {
 				feedback = "The answer omits the requested conclusion."
 			}
-			content, _ := json.Marshal(AutonomousVerification{Approved: approved, Feedback: feedback})
+			content, _ := json.Marshal(AgentVerification{Approved: approved, Feedback: feedback})
 			writeJSON(w, http.StatusOK, ChatResponse{Message: ChatMessage{Role: "assistant", Content: string(content)}})
 			return
 		}
@@ -674,14 +674,14 @@ func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
 	ollamaURL, webStore = ollama.URL, newWebSessionStore()
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "provide a conclusion", defaultSystemPrompt, "default")
+	sess.AgentMode = true
+	sess.AgentRun = newAgentRun(sess.ID, "provide a conclusion", defaultSystemPrompt, "default")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runAutonomousAgent(ctx, sess)
+	runAgent(ctx, sess)
 
-	run := sess.autonomousSnapshot()
-	if run.Status != autonomousWaitingApproval || run.FinalAnswer != "complete revised answer" || agentCalls != 4 || criticCalls != 4 {
+	run := sess.agentSnapshot()
+	if run.Status != agentWaitingApproval || run.FinalAnswer != "complete revised answer" || agentCalls != 4 || criticCalls != 4 {
 		t.Fatalf("critic revision flow failed: agentCalls=%d criticCalls=%d run=%+v", agentCalls, criticCalls, run)
 	}
 	foundRejectedCandidate := false
@@ -695,13 +695,13 @@ func TestBackendAutonomousRunRevisesCriticRejectedAnswer(t *testing.T) {
 	}
 }
 
-func TestAutonomousRevisionContextPreservesCandidateAndRequestedChanges(t *testing.T) {
-	run := newAutonomousRun("session", "write a simple Go web server", defaultSystemPrompt, "default")
+func TestAgentRevisionContextPreservesCandidateAndRequestedChanges(t *testing.T) {
+	run := newAgentRun("session", "write a simple Go web server", defaultSystemPrompt, "default")
 	run.CandidateHistory = []string{"package main\n\nfunc main() { startServer() }"}
 	run.UserRequirements = []string{"add a health check endpoint", "add basic authentication with admin/admin"}
-	sess := &webSession{ID: "session", AutonomousRun: run}
+	sess := &webSession{ID: "session", AgentRun: run}
 
-	messages, err := autonomousMessages(sess)
+	messages, err := agentMessages(sess)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -711,7 +711,7 @@ func TestAutonomousRevisionContextPreservesCandidateAndRequestedChanges(t *testi
 		}
 	}
 
-	contextText := autonomousRevisionContext(run)
+	contextText := agentRevisionContext(run)
 	if !strings.Contains(contextText, "Candidate 1") || !strings.Contains(contextText, "User-requested changes") {
 		t.Fatalf("revision context omitted structured history: %s", contextText)
 	}
@@ -733,12 +733,12 @@ func TestAutonomousRevisionContextPreservesCandidateAndRequestedChanges(t *testi
 	previousURL := ollamaURL
 	ollamaURL = ollama.URL
 	t.Cleanup(func() { ollamaURL = previousURL })
-	if _, err := verifyAutonomousAnswer(context.Background(), sess, "complete revised code"); err != nil {
+	if _, err := verifyAgentAnswer(context.Background(), sess, "complete revised code"); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func TestAutonomousCodeGoalRejectsProseOnlyCandidate(t *testing.T) {
+func TestAgentCodeGoalRejectsProseOnlyCandidate(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	responseActions := []ToolResponse{
 		{Action: "answer", Text: "Here is a simple Go web server example."},
@@ -773,22 +773,22 @@ func TestAutonomousCodeGoalRejectsProseOnlyCandidate(t *testing.T) {
 	ollamaURL, webStore = ollama.URL, newWebSessionStore()
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 	sess := webStore.ensure("")
-	sess.AutonomousMode = true
-	sess.AutonomousRun = newAutonomousRun(sess.ID, "write app in golang - simple web server", defaultSystemPrompt, "default")
+	sess.AgentMode = true
+	sess.AgentRun = newAgentRun(sess.ID, "write app in golang - simple web server", defaultSystemPrompt, "default")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runAutonomousAgent(ctx, sess)
+	runAgent(ctx, sess)
 
-	run := sess.autonomousSnapshot()
-	if run.Status != autonomousWaitingApproval || agentCalls != 2 || criticCalls != 1 || !strings.HasSuffix(run.FinalAnswer, "\n```") {
+	run := sess.agentSnapshot()
+	if run.Status != agentWaitingApproval || agentCalls != 2 || criticCalls != 1 || !strings.HasSuffix(run.FinalAnswer, "\n```") {
 		t.Fatalf("code deliverable gate failed: agents=%d critics=%d run=%+v", agentCalls, criticCalls, run)
 	}
 }
 
-func TestAutonomousLifecycleAPI(t *testing.T) {
+func TestAgentLifecycleAPI(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeAutonomousCriticApproval(w, r) {
+		if writeAgentCriticApproval(w, r) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(ChatResponse{Message: ChatMessage{Role: "assistant", Content: `{"action":"answer","text":"candidate"}`}})
@@ -805,26 +805,26 @@ func TestAutonomousLifecycleAPI(t *testing.T) {
 	})
 
 	start := httptest.NewRecorder()
-	handleAutonomousStart(start, httptest.NewRequest(http.MethodPost, "/api/autonomous/start", bytes.NewBufferString(`{"goal":"answer independently"}`)))
+	handleAgentStart(start, httptest.NewRequest(http.MethodPost, "/api/agent/start", bytes.NewBufferString(`{"goal":"answer independently"}`)))
 	if start.Code != http.StatusOK {
 		t.Fatalf("start status = %d, body = %s", start.Code, start.Body.String())
 	}
 	var started struct {
-		SessionID string         `json:"sessionId"`
-		Run       *AutonomousRun `json:"run"`
+		SessionID string    `json:"sessionId"`
+		Run       *AgentRun `json:"run"`
 	}
 	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil {
 		t.Fatal(err)
 	}
 	if started.Run.BasePrompt != defaultSystemPrompt || started.Run.BasePromptName != "default" || systemPrompt != defaultSystemPrompt || systemPromptName != "default" {
-		t.Fatalf("autonomous start did not reset prompt to default: run=%+v global=%q/%q", started.Run, systemPromptName, systemPrompt)
+		t.Fatalf("agent start did not reset prompt to default: run=%+v global=%q/%q", started.Run, systemPromptName, systemPrompt)
 	}
-	waitForAutonomousStatus(t, started.SessionID, autonomousWaitingApproval)
+	waitForAgentStatus(t, started.SessionID, agentWaitingApproval)
 
 	status := httptest.NewRecorder()
-	handleAutonomousStatus(status, httptest.NewRequest(http.MethodGet, "/api/autonomous/status?sessionId="+started.SessionID, nil))
+	handleAgentStatus(status, httptest.NewRequest(http.MethodGet, "/api/agent/status?sessionId="+started.SessionID, nil))
 	var statusPayload struct {
-		Run *AutonomousRun `json:"run"`
+		Run *AgentRun `json:"run"`
 	}
 	if err := json.Unmarshal(status.Body.Bytes(), &statusPayload); err != nil {
 		t.Fatal(err)
@@ -835,20 +835,20 @@ func TestAutonomousLifecycleAPI(t *testing.T) {
 
 	decision := httptest.NewRecorder()
 	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"accept"}`, started.SessionID))
-	handleAutonomousDecision(decision, httptest.NewRequest(http.MethodPost, "/api/autonomous/decision", body))
+	handleAgentDecision(decision, httptest.NewRequest(http.MethodPost, "/api/agent/decision", body))
 	if decision.Code != http.StatusOK {
 		t.Fatalf("decision status = %d, body = %s", decision.Code, decision.Body.String())
 	}
-	if run := webStore.ensure(started.SessionID).autonomousSnapshot(); run.Status != autonomousCompleted {
+	if run := webStore.ensure(started.SessionID).agentSnapshot(); run.Status != agentCompleted {
 		t.Fatalf("accepted run status = %s", run.Status)
 	}
 }
 
-func TestAutonomousClarificationLifecycle(t *testing.T) {
+func TestAgentClarificationLifecycle(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	agentCalls := 0
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if writeAutonomousCriticApproval(w, r) {
+		if writeAgentCriticApproval(w, r) {
 			return
 		}
 		agentCalls++
@@ -865,34 +865,34 @@ func TestAutonomousClarificationLifecycle(t *testing.T) {
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 
 	start := httptest.NewRecorder()
-	handleAutonomousStart(start, httptest.NewRequest(http.MethodPost, "/api/autonomous/start", bytes.NewBufferString(`{"goal":"format the result"}`)))
+	handleAgentStart(start, httptest.NewRequest(http.MethodPost, "/api/agent/start", bytes.NewBufferString(`{"goal":"format the result"}`)))
 	var started struct {
 		SessionID string `json:"sessionId"`
 	}
 	if err := json.Unmarshal(start.Body.Bytes(), &started); err != nil {
 		t.Fatal(err)
 	}
-	waitForAutonomousStatus(t, started.SessionID, autonomousWaitingInput)
+	waitForAgentStatus(t, started.SessionID, agentWaitingInput)
 
 	empty := httptest.NewRecorder()
-	handleAutonomousDecision(empty, httptest.NewRequest(http.MethodPost, "/api/autonomous/decision", bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"continue"}`, started.SessionID))))
+	handleAgentDecision(empty, httptest.NewRequest(http.MethodPost, "/api/agent/decision", bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"continue"}`, started.SessionID))))
 	if empty.Code != http.StatusBadRequest {
 		t.Fatalf("empty clarification status = %d, body = %s", empty.Code, empty.Body.String())
 	}
 
 	decision := httptest.NewRecorder()
-	handleAutonomousDecision(decision, httptest.NewRequest(http.MethodPost, "/api/autonomous/decision", bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"continue","feedback":"JSON"}`, started.SessionID))))
+	handleAgentDecision(decision, httptest.NewRequest(http.MethodPost, "/api/agent/decision", bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q,"decision":"continue","feedback":"JSON"}`, started.SessionID))))
 	if decision.Code != http.StatusOK {
 		t.Fatalf("clarification status = %d, body = %s", decision.Code, decision.Body.String())
 	}
-	waitForAutonomousStatus(t, started.SessionID, autonomousWaitingApproval)
-	run := webStore.ensure(started.SessionID).autonomousSnapshot()
+	waitForAgentStatus(t, started.SessionID, agentWaitingApproval)
+	run := webStore.ensure(started.SessionID).agentSnapshot()
 	if run.FinalAnswer != "Used JSON as requested." || agentCalls != 2 {
 		t.Fatalf("clarification did not resume run: agentCalls=%d run=%+v", agentCalls, run)
 	}
 }
 
-func TestAutonomousStopCancelsModelRequest(t *testing.T) {
+func TestAgentStopCancelsModelRequest(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	requestStarted := make(chan struct{})
 	releaseRequest := make(chan struct{})
@@ -910,7 +910,7 @@ func TestAutonomousStopCancelsModelRequest(t *testing.T) {
 	t.Cleanup(func() { ollamaURL, webStore = previousURL, previousStore })
 
 	start := httptest.NewRecorder()
-	handleAutonomousStart(start, httptest.NewRequest(http.MethodPost, "/api/autonomous/start", bytes.NewBufferString(`{"goal":"wait"}`)))
+	handleAgentStart(start, httptest.NewRequest(http.MethodPost, "/api/agent/start", bytes.NewBufferString(`{"goal":"wait"}`)))
 	var started struct {
 		SessionID string `json:"sessionId"`
 	}
@@ -925,28 +925,28 @@ func TestAutonomousStopCancelsModelRequest(t *testing.T) {
 
 	stop := httptest.NewRecorder()
 	body := bytes.NewBufferString(fmt.Sprintf(`{"sessionId":%q}`, started.SessionID))
-	handleAutonomousStop(stop, httptest.NewRequest(http.MethodPost, "/api/autonomous/stop", body))
+	handleAgentStop(stop, httptest.NewRequest(http.MethodPost, "/api/agent/stop", body))
 	if stop.Code != http.StatusOK {
 		t.Fatalf("stop status = %d, body = %s", stop.Code, stop.Body.String())
 	}
-	if run := webStore.ensure(started.SessionID).autonomousSnapshot(); run.Status != autonomousCancelled {
+	if run := webStore.ensure(started.SessionID).agentSnapshot(); run.Status != agentCancelled {
 		t.Fatalf("stopped run status = %s", run.Status)
 	}
 }
 
-func waitForAutonomousStatus(t *testing.T, sessionID string, want AutonomousRunStatus) {
+func waitForAgentStatus(t *testing.T, sessionID string, want AgentRunStatus) {
 	t.Helper()
 	deadline := time.NewTimer(time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if run := webStore.ensure(sessionID).autonomousSnapshot(); run != nil && run.Status == want {
+		if run := webStore.ensure(sessionID).agentSnapshot(); run != nil && run.Status == want {
 			return
 		}
 		select {
 		case <-deadline.C:
-			t.Fatalf("autonomous run did not reach %s", want)
+			t.Fatalf("agent run did not reach %s", want)
 		case <-ticker.C:
 		}
 	}
@@ -1005,17 +1005,17 @@ func TestWebStateStartsFreshAfterRestart(t *testing.T) {
 	original := webStore.ensure("")
 	original.appendMessage("user", "shared question")
 	original.appendMessage("assistant", "shared answer")
-	original.AutonomousMode = true
-	original.AutonomousGoal = "shared goal"
+	original.AgentMode = true
+	original.AgentGoal = "shared goal"
 	original.AwaitingDecision = true
-	autonomousDir, err := owrapAutonomousSessionDir(original.ID)
+	agentDir, err := owrapAgentSessionDir(original.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(autonomousDir, 0755); err != nil {
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
 		t.Fatal(err)
 	}
-	original.AttachedFilePath = filepath.Join(autonomousDir, "attachment.txt")
+	original.AttachedFilePath = filepath.Join(agentDir, "attachment.txt")
 	if err := os.WriteFile(original.AttachedFilePath, []byte("stale"), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -1038,11 +1038,11 @@ func TestWebStateStartsFreshAfterRestart(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &restored); err != nil {
 		t.Fatal(err)
 	}
-	if restored.SessionID == original.ID || len(restored.Messages) != 0 || restored.AutonomousMode || restored.AutonomousGoal != "" || restored.AutonomousDecision {
+	if restored.SessionID == original.ID || len(restored.Messages) != 0 || restored.AgentMode || restored.AgentGoal != "" || restored.AgentDecision {
 		t.Fatalf("restart did not clear state: %+v", restored)
 	}
-	if _, err := os.Stat(autonomousDir); !os.IsNotExist(err) {
-		t.Fatalf("stale autonomous directory still exists: %v", err)
+	if _, err := os.Stat(agentDir); !os.IsNotExist(err) {
+		t.Fatalf("stale agent directory still exists: %v", err)
 	}
 
 	resetResponse := httptest.NewRecorder()
