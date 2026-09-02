@@ -967,6 +967,7 @@ func (s *webSession) appendAgentMessage(message ChatMessage) {
 	defer s.mu.Unlock()
 	s.Messages = append(s.Messages, message)
 	s.Stats.recordMessage(message)
+	s.Stats.updateContext(systemPrompt, s.Messages)
 }
 
 func logAutonomousError(sessionID string, err error) {
