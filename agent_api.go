@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// AutoStartRequest represents the JSON body for starting autonomous mode
+// AutoStartRequest represents the JSON body for starting agent mode
 type FileAttachment struct {
 	Name    string `json:"name"`
 	Size    int64  `json:"size"`
@@ -28,8 +28,8 @@ type AutoStartRequest struct {
 	File               *FileAttachment `json:"file,omitempty"`
 }
 
-// handleAutonomousStart activates autonomous mode for a session
-func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
+// handleAgentStart activates agent mode for a session
+func handleAgentStart(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -48,8 +48,8 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
-	if run := sess.autonomousSnapshot(); run != nil && (run.Status == autonomousRunning || run.Status == autonomousWaitingApproval || run.Status == autonomousWaitingInput) {
-		http.Error(w, "an autonomous run is already active", http.StatusConflict)
+	if run := sess.agentSnapshot(); run != nil && (run.Status == agentRunning || run.Status == agentWaitingApproval || run.Status == agentWaitingInput) {
+		http.Error(w, "an agent run is already active", http.StatusConflict)
 		return
 	}
 	systemPrompt = defaultSystemPrompt
@@ -59,11 +59,11 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	sess.OriginalPrompt = basePrompt
 	sess.OriginalPromptName = basePromptName
 
-	// Activate autonomous mode
-	sess.AutonomousMode = true
-	sess.AutonomousGoal = req.Goal
+	// Activate agent mode
+	sess.AgentMode = true
+	sess.AgentGoal = req.Goal
 	sess.AwaitingDecision = false
-	sess.AutonomousStart = len(sess.Messages)
+	sess.AgentStart = len(sess.Messages)
 	sess.RetryCount = 0
 	sess.CommandCount = 0
 	sess.PartialFindings = ""
@@ -75,26 +75,26 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 		sess.AttachedFile = req.File
 
 		// Create application directory for this session's files
-		tempDir, err := owrapAutonomousSessionDir(sess.ID)
+		tempDir, err := owrapAgentSessionDir(sess.ID)
 		if err != nil {
-			log.Printf("[AUTONOMOUS] Warning: failed to resolve storage dir: %v", err)
+			log.Printf("[AGENT] Warning: failed to resolve storage dir: %v", err)
 		} else if err := os.MkdirAll(tempDir, 0755); err != nil {
-			log.Printf("[AUTONOMOUS] Warning: failed to create temp dir: %v", err)
+			log.Printf("[AGENT] Warning: failed to create temp dir: %v", err)
 		} else {
 			// Write file to temp directory
 			filePath = filepath.Join(tempDir, req.File.Name)
 			if err := os.WriteFile(filePath, []byte(req.File.Content), 0644); err != nil {
-				log.Printf("[AUTONOMOUS] Warning: failed to write temp file: %v", err)
+				log.Printf("[AGENT] Warning: failed to write temp file: %v", err)
 				filePath = "" // Clear path if write failed
 			} else {
 				sess.AttachedFilePath = filePath
-				log.Printf("[AUTONOMOUS] Mode activated for session %s: goal=%s, file=%s, path=%s", sess.ID, req.Goal, req.File.Name, filePath)
+				log.Printf("[AGENT] Mode activated for session %s: goal=%s, file=%s, path=%s", sess.ID, req.Goal, req.File.Name, filePath)
 			}
 		}
 	} else {
 		sess.AttachedFile = nil
 		sess.AttachedFilePath = ""
-		log.Printf("[AUTONOMOUS] Mode activated for session %s: goal=%s", sess.ID, req.Goal)
+		log.Printf("[AGENT] Mode activated for session %s: goal=%s", sess.ID, req.Goal)
 	}
 
 	// Build goal description (don't include file content in system prompt anymore)
@@ -105,36 +105,36 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate prompt composition before launching the worker.
-	_, err := composeAutonomousPrompt(basePrompt, goalDescription, "No previous attempts yet.")
+	_, err := composeAgentPrompt(basePrompt, goalDescription, "No previous attempts yet.")
 	if err != nil {
-		http.Error(w, fmt.Sprintf("failed to load autonomous prompt: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to load agent prompt: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	run := newAutonomousRun(sess.ID, goalDescription, basePrompt, basePromptName)
-	run.GoalSpec = normalizeAutonomousGoalSpec(AutonomousGoalSpec{
+	run := newAgentRun(sess.ID, goalDescription, basePrompt, basePromptName)
+	run.GoalSpec = normalizeAgentGoalSpec(AgentGoalSpec{
 		Objective:          req.Goal,
 		ExpectedOutput:     req.ExpectedOutput,
 		Constraints:        req.Constraints,
 		CompletionCriteria: req.CompletionCriteria,
 	})
-	ctx, cancel := autonomousRunContext()
+	ctx, cancel := agentRunContext()
 	done := make(chan struct{})
 	sess.mu.Lock()
-	sess.AutonomousRun = run
-	sess.autonomousCancel = cancel
-	sess.autonomousDone = done
+	sess.AgentRun = run
+	sess.agentCancel = cancel
+	sess.agentDone = done
 	sess.mu.Unlock()
 	if err := webStore.persist(); err != nil {
 		cancel()
-		http.Error(w, fmt.Sprintf("failed to persist autonomous run: %v", err), http.StatusInternalServerError)
+		http.Error(w, fmt.Sprintf("failed to persist agent run: %v", err), http.StatusInternalServerError)
 		return
 	}
 
 	response := map[string]interface{}{
 		"sessionId": sess.ID,
-		"status":    "autonomous_mode_active",
-		"message":   fmt.Sprintf("Autonomous mode activated. Goal: %s", req.Goal),
+		"status":    "agent_mode_active",
+		"message":   fmt.Sprintf("Agent mode activated. Goal: %s", req.Goal),
 		"goal":      req.Goal,
 		"run":       run,
 	}
@@ -146,12 +146,12 @@ func handleAutonomousStart(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer cancel()
 		defer close(done)
-		runAutonomousAgent(ctx, sess)
+		runAgent(ctx, sess)
 	}()
 }
 
-// handleAutonomousStop deactivates autonomous mode for a session
-func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
+// handleAgentStop deactivates agent mode for a session
+func handleAgentStop(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -172,46 +172,46 @@ func handleAutonomousStop(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if !sess.AutonomousMode {
+	if !sess.AgentMode {
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"sessionId": sess.ID,
 			"status":    "not_active",
-			"message":   "Autonomous mode was not active",
+			"message":   "Agent mode was not active",
 		})
 		return
 	}
 
 	sess.mu.Lock()
-	done := sess.autonomousDone
+	done := sess.agentDone
 	sess.mu.Unlock()
-	sess.cancelAutonomousRun()
-	finishAutonomous(sess, autonomousCancelled, "", "stopped by user")
+	sess.cancelAgentRun()
+	finishAgent(sess, agentCancelled, "", "stopped by user")
 	if done != nil {
 		select {
 		case <-done:
 		case <-time.After(2 * time.Second):
-			log.Printf("[AUTONOMOUS] Timed out waiting for worker shutdown in session %s", sess.ID)
+			log.Printf("[AGENT] Timed out waiting for worker shutdown in session %s", sess.ID)
 		}
 	}
 
-	// Deactivate autonomous mode
-	sess.AutonomousMode = false
-	sess.AutonomousGoal = ""
+	// Deactivate agent mode
+	sess.AgentMode = false
+	sess.AgentGoal = ""
 	sess.AwaitingDecision = false
-	sess.AutonomousStart = 0
+	sess.AgentStart = 0
 	sess.AttachedFile = nil
 	sess.AttachedFilePath = ""
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"sessionId": sess.ID,
-		"status":    "autonomous_mode_stopped",
-		"message":   "Autonomous mode deactivated. System prompt restored.",
+		"status":    "agent_mode_stopped",
+		"message":   "Agent mode deactivated. System prompt restored.",
 		"prompt":    sess.OriginalPromptName,
-		"run":       sess.autonomousSnapshot(),
+		"run":       sess.agentSnapshot(),
 	})
 }
 
-func handleAutonomousStatus(w http.ResponseWriter, r *http.Request) {
+func handleAgentStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -219,13 +219,13 @@ func handleAutonomousStatus(w http.ResponseWriter, r *http.Request) {
 	sess := webStore.ensure(r.URL.Query().Get("sessionId"))
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"sessionId": sess.ID,
-		"run":       sess.autonomousSnapshot(),
+		"run":       sess.agentSnapshot(),
 		"messages":  sess.Messages,
 		"stats":     sess.Stats,
 	})
 }
 
-func handleAutonomousDecision(w http.ResponseWriter, r *http.Request) {
+func handleAgentDecision(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
@@ -240,60 +240,60 @@ func handleAutonomousDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := webStore.ensure(req.SessionID)
-	run := sess.autonomousSnapshot()
-	if run == nil || (run.Status != autonomousWaitingApproval && run.Status != autonomousWaitingInput) {
-		http.Error(w, "no autonomous decision is awaiting input", http.StatusConflict)
+	run := sess.agentSnapshot()
+	if run == nil || (run.Status != agentWaitingApproval && run.Status != agentWaitingInput) {
+		http.Error(w, "no agent decision is awaiting input", http.StatusConflict)
 		return
 	}
 
 	switch req.Decision {
 	case "continue":
 		feedback := strings.TrimSpace(req.Feedback)
-		if feedback == "" && run.Status == autonomousWaitingInput {
+		if feedback == "" && run.Status == agentWaitingInput {
 			http.Error(w, "clarification feedback required", http.StatusBadRequest)
 			return
 		}
 		if feedback == "" {
 			feedback = "The candidate answer is incomplete. Review the goal, address remaining gaps, and improve it."
 		}
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "feedback", Text: feedback})
+		sess.appendAgentEvent(AgentEvent{Kind: "feedback", Text: feedback})
 		sess.mu.Lock()
-		sess.AutonomousRun.UserRequirements = append(sess.AutonomousRun.UserRequirements, feedback)
+		sess.AgentRun.UserRequirements = append(sess.AgentRun.UserRequirements, feedback)
 		sess.AwaitingDecision = false
-		sess.AutonomousMode = true
-		sess.AutonomousRun.Status = autonomousRunning
-		sess.AutonomousRun.FinalAnswer = ""
-		sess.AutonomousRun.UpdatedAt = time.Now().UTC()
-		ctx, cancel := autonomousRunContext()
+		sess.AgentMode = true
+		sess.AgentRun.Status = agentRunning
+		sess.AgentRun.FinalAnswer = ""
+		sess.AgentRun.UpdatedAt = time.Now().UTC()
+		ctx, cancel := agentRunContext()
 		done := make(chan struct{})
-		sess.autonomousCancel = cancel
-		sess.autonomousDone = done
+		sess.agentCancel = cancel
+		sess.agentDone = done
 		sess.mu.Unlock()
 		go func() {
 			defer cancel()
 			defer close(done)
-			runAutonomousAgent(ctx, sess)
+			runAgent(ctx, sess)
 		}()
 	case "accept":
-		if run.Status == autonomousWaitingInput {
+		if run.Status == agentWaitingInput {
 			http.Error(w, "clarification cannot be accepted as a final answer", http.StatusBadRequest)
 			return
 		}
-		finishAutonomous(sess, autonomousCompleted, run.FinalAnswer, "")
+		finishAgent(sess, agentCompleted, run.FinalAnswer, "")
 	default:
 		http.Error(w, "decision must be continue or accept", http.StatusBadRequest)
 		return
 	}
 	if err := webStore.persist(); err != nil {
-		log.Printf("warning: could not persist autonomous decision: %v", err)
+		log.Printf("warning: could not persist agent decision: %v", err)
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{
 		"sessionId": sess.ID,
-		"run":       sess.autonomousSnapshot(),
+		"run":       sess.agentSnapshot(),
 	})
 }
 
-// buildIterationHistory generates a summary of recent conversation for autonomous mode
+// buildIterationHistory generates a summary of recent conversation for agent mode
 func buildIterationHistory(sess *webSession) string {
 	if len(sess.Messages) == 0 {
 		return "No previous attempts yet."
@@ -301,8 +301,8 @@ func buildIterationHistory(sess *webSession) string {
 
 	// Get last few messages to show what happened
 	start := len(sess.Messages) - 6
-	if sess.AutonomousMode && start < sess.AutonomousStart {
-		start = sess.AutonomousStart
+	if sess.AgentMode && start < sess.AgentStart {
+		start = sess.AgentStart
 	}
 	if start < 0 {
 		start = 0
@@ -330,9 +330,9 @@ func getRecentCommands(sess *webSession) []string {
 	return sess.LastCommands
 }
 
-// composeAutonomousPrompt preserves the selected prompt and appends the autonomous protocol.
-func composeAutonomousPrompt(basePrompt, goal, history string) (string, error) {
-	promptPath := "prompts/autonomous_agent.txt"
+// composeAgentPrompt preserves the selected prompt and appends the agent protocol.
+func composeAgentPrompt(basePrompt, goal, history string) (string, error) {
+	promptPath := "prompts/agent.txt"
 	data, err := os.ReadFile(promptPath)
 	if err != nil {
 		return "", err
@@ -345,8 +345,8 @@ func composeAutonomousPrompt(basePrompt, goal, history string) (string, error) {
 	return strings.TrimSpace(basePrompt) + "\n\n---\n\n" + protocol, nil
 }
 
-// handleAutonomousCommand processes commands in autonomous mode with special logic
-func handleAutonomousCommand(sess *webSession, tool ToolResponse, messageContent string, out string, messages []ChatMessage) webChatResponse {
+// handleAgentCommand processes commands in agent mode with special logic
+func handleAgentCommand(sess *webSession, tool ToolResponse, messageContent string, out string, messages []ChatMessage) webChatResponse {
 	// Increment command count
 	sess.CommandCount++
 
@@ -414,7 +414,7 @@ CRITICAL DECISION:
 6. If information is INCOMPLETE:
    {"action":"run_command","command":"<specific command to get missing data>"}
 
-Do NOT re-run commands for data you already found (✅ section). Focus ONLY on missing parts.`, sess.CommandCount, sess.AutonomousGoal, partialSection, history)
+Do NOT re-run commands for data you already found (✅ section). Focus ONLY on missing parts.`, sess.CommandCount, sess.AgentGoal, partialSection, history)
 	} else {
 		// Simple continuation - include recent commands to prevent duplicates
 		recentCmds := getRecentCommands(sess)
@@ -436,51 +436,51 @@ What's your NEXT command (different from above)?
 	sess.appendContextMessage("user", analysisPrompt)
 
 	return webChatResponse{
-		SessionID:          sess.ID,
-		Action:             "run_command",
-		AssistantText:      messageContent + "\n\n" + summaryNote,
-		Command:            tool.Command,
-		CommandOutput:      out,
-		Messages:           sess.Messages,
-		Model:              modelName,
-		Timestamp:          time.Now().UTC(),
-		Stats:              sess.Stats,
-		AutonomousMode:     sess.AutonomousMode,
-		AutonomousContinue: true, // Always continue to get analysis
-		CommandCount:       sess.CommandCount,
+		SessionID:     sess.ID,
+		Action:        "run_command",
+		AssistantText: messageContent + "\n\n" + summaryNote,
+		Command:       tool.Command,
+		CommandOutput: out,
+		Messages:      sess.Messages,
+		Model:         modelName,
+		Timestamp:     time.Now().UTC(),
+		Stats:         sess.Stats,
+		AgentMode:     sess.AgentMode,
+		AgentContinue: true, // Always continue to get analysis
+		CommandCount:  sess.CommandCount,
 	}
 }
 
-// handleAutonomousJSONError handles JSON parsing errors in autonomous mode
-func handleAutonomousJSONError(sess *webSession, raw string, clean string, err error) webChatResponse {
+// handleAgentJSONError handles JSON parsing errors in agent mode
+func handleAgentJSONError(sess *webSession, raw string, clean string, err error) webChatResponse {
 	sess.RetryCount++
 	truncLen := 100
 	if len(clean) < truncLen {
 		truncLen = len(clean)
 	}
-	log.Printf("[AUTONOMOUS] JSON parse failed (retry %d/3): %v. Response was: %s", sess.RetryCount, err, clean[:truncLen])
+	log.Printf("[AGENT] JSON parse failed (retry %d/3): %v. Response was: %s", sess.RetryCount, err, clean[:truncLen])
 
-	// After 3 retries, stop autonomous mode
+	// After 3 retries, stop agent mode
 	if sess.RetryCount >= 3 {
 		sess.RetryCount = 0
-		log.Printf("[AUTONOMOUS] Max retries reached, requesting normal stop cleanup")
+		log.Printf("[AGENT] Max retries reached, requesting normal stop cleanup")
 
 		sess.appendMessage("assistant", raw)
-		errorText := "❌ Agent failed to follow the autonomous response protocol after 3 retries. Stopping autonomous mode."
+		errorText := "❌ Agent failed to follow the agent response protocol after 3 retries. Stopping agent mode."
 		sess.appendMessage("assistant", errorText)
 
 		return webChatResponse{
-			SessionID:          sess.ID,
-			Action:             "answer",
-			AssistantText:      errorText,
-			Raw:                raw,
-			Messages:           sess.Messages,
-			Model:              modelName,
-			Timestamp:          time.Now().UTC(),
-			Stats:              sess.Stats,
-			AutonomousMode:     true,
-			AutonomousContinue: false,
-			AutonomousStop:     true,
+			SessionID:     sess.ID,
+			Action:        "answer",
+			AssistantText: errorText,
+			Raw:           raw,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+			AgentMode:     true,
+			AgentContinue: false,
+			AgentStop:     true,
 		}
 	}
 
@@ -529,20 +529,20 @@ Try again NOW with ONLY the JSON object.`, sess.RetryCount, invalidResponsePrevi
 	sess.appendContextMessage("user", errorMsg)
 
 	return webChatResponse{
-		SessionID:          sess.ID,
-		Action:             "error",
-		AssistantText:      fmt.Sprintf("⚠️ Agent broke JSON format (retry %d/3). Forcing correction...", sess.RetryCount),
-		Raw:                raw,
-		Messages:           sess.Messages,
-		Model:              modelName,
-		Timestamp:          time.Now().UTC(),
-		Stats:              sess.Stats,
-		AutonomousMode:     sess.AutonomousMode,
-		AutonomousContinue: true, // Force retry
+		SessionID:     sess.ID,
+		Action:        "error",
+		AssistantText: fmt.Sprintf("⚠️ Agent broke JSON format (retry %d/3). Forcing correction...", sess.RetryCount),
+		Raw:           raw,
+		Messages:      sess.Messages,
+		Model:         modelName,
+		Timestamp:     time.Now().UTC(),
+		Stats:         sess.Stats,
+		AgentMode:     sess.AgentMode,
+		AgentContinue: true, // Force retry
 	}
 }
 
-// handleUpdateFindings processes the update_findings action in autonomous mode
+// handleUpdateFindings processes the update_findings action in agent mode
 func handleUpdateFindings(sess *webSession, tool ToolResponse) webChatResponse {
 	// Store partial findings to avoid re-running commands
 	if tool.Text != "" {
@@ -551,46 +551,46 @@ func handleUpdateFindings(sess *webSession, tool ToolResponse) webChatResponse {
 		} else {
 			sess.PartialFindings += "\n" + tool.Text
 		}
-		log.Printf("[AUTONOMOUS] Updated findings for session %s: %s", sess.ID, tool.Text)
+		log.Printf("[AGENT] Updated findings for session %s: %s", sess.ID, tool.Text)
 	}
 	content := "✅ Saved: " + tool.Text
 	sess.appendMessage("assistant", content)
 
-	// Continue autonomous mode
+	// Continue agent mode
 	return webChatResponse{
-		SessionID:          sess.ID,
-		Action:             "update_findings",
-		AssistantText:      content,
-		Messages:           sess.Messages,
-		Model:              modelName,
-		Timestamp:          time.Now().UTC(),
-		Stats:              sess.Stats,
-		AutonomousMode:     sess.AutonomousMode,
-		AutonomousContinue: true,
-		CommandCount:       sess.CommandCount,
+		SessionID:     sess.ID,
+		Action:        "update_findings",
+		AssistantText: content,
+		Messages:      sess.Messages,
+		Model:         modelName,
+		Timestamp:     time.Now().UTC(),
+		Stats:         sess.Stats,
+		AgentMode:     sess.AgentMode,
+		AgentContinue: true,
+		CommandCount:  sess.CommandCount,
 	}
 }
 
-// handleAutonomousAnswer pauses autonomous mode so the user can accept the answer or continue.
-func handleAutonomousAnswer(sess *webSession, tool ToolResponse) webChatResponse {
+// handleAgentAnswer pauses agent mode so the user can accept the answer or continue.
+func handleAgentAnswer(sess *webSession, tool ToolResponse) webChatResponse {
 	sess.appendMessage("assistant", tool.Text)
-	sess.AwaitingDecision = sess.AutonomousMode
+	sess.AwaitingDecision = sess.AgentMode
 
 	response := webChatResponse{
-		SessionID:          sess.ID,
-		Action:             "answer",
-		AssistantText:      tool.Text,
-		Messages:           sess.Messages,
-		Model:              modelName,
-		Timestamp:          time.Now().UTC(),
-		Stats:              sess.Stats,
-		AutonomousMode:     sess.AutonomousMode,
-		AutonomousContinue: false,
-		AutonomousDecision: sess.AutonomousMode,
+		SessionID:     sess.ID,
+		Action:        "answer",
+		AssistantText: tool.Text,
+		Messages:      sess.Messages,
+		Model:         modelName,
+		Timestamp:     time.Now().UTC(),
+		Stats:         sess.Stats,
+		AgentMode:     sess.AgentMode,
+		AgentContinue: false,
+		AgentDecision: sess.AgentMode,
 	}
 
-	if sess.AutonomousMode {
-		log.Printf("[AUTONOMOUS] Candidate answer ready for user decision in session %s", sess.ID)
+	if sess.AgentMode {
+		log.Printf("[AGENT] Candidate answer ready for user decision in session %s", sess.ID)
 	}
 
 	return response

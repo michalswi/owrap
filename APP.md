@@ -14,7 +14,7 @@ OWRAP provides:
 - Optional model analysis of command output.
 - Conversation statistics and JSON session save/load.
 - Runtime selection or editing of system prompts.
-- A beta web-only, server-owned autonomous agent with file attachments and background jobs.
+- A beta web-only, server-owned agent with file attachments and background jobs.
 
 The project is intentionally lightweight. It uses the Go standard library for HTTP, JSON, process execution, embedding, files, flags, and synchronization. Its only direct third-party dependency is `github.com/michalswi/color`, used for terminal colors.
 
@@ -33,18 +33,18 @@ Keep these boundaries in mind when reasoning about the app:
 ## Repository Map
 
 - `main.go`: shared data types, Ollama client, command runner, background jobs, web server and API handlers, session file helpers, and CLI entry point.
-- `agent.go`: autonomous run/event model, backend worker, limits, strict action parsing, tool execution, and cleanup.
-- `autonomous.go`: autonomous start/stop/status/decision HTTP lifecycle and uploaded-file handling.
+- `agent.go`: agent run/event model, backend worker, limits, strict action parsing, tool execution, and cleanup.
+- `agent.go`: agent start/stop/status/decision HTTP lifecycle and uploaded-file handling.
 - `comm.go`: command-name allowlist.
 - `help.go`: CLI slash-command dispatcher, help output, prompt editor, session restore, and prompt-history display.
 - `vars.go`: version, default system prompt, environment-derived configuration, global CLI state, and web help text.
 - `banner.go`: terminal banner.
 - `utils/utils.go`: environment lookup and startup system-prompt loading.
-- `webstatic/index.html`: complete browser UI, process-lifetime server-state restoration, local preferences, API calls, autonomous status observer, and attachment reader.
-- `prompts/*.txt`: predefined role prompts and the autonomous-agent protocol prompt.
+- `webstatic/index.html`: complete browser UI, process-lifetime server-state restoration, local preferences, API calls, agent status observer, and attachment reader.
+- `prompts/*.txt`: predefined role prompts and the agent-agent protocol prompt.
 - `Makefile`: native, cross-platform, and multi-architecture Docker build targets.
 - `Dockerfile`: multi-stage image that runs web mode as an unprivileged `app` user.
-- `README.md`: concise operator guide covering setup, configuration, run modes, common controls, persistence, security, and autonomous-mode usage.
+- `README.md`: concise operator guide covering setup, configuration, run modes, common controls, persistence, security, and agent-mode usage.
 
 ## Runtime Configuration
 
@@ -78,7 +78,7 @@ OWRAP sends a non-streaming `POST` request to `OLLAMA_URL` with this conceptual 
 }
 ```
 
-`format: "json"` is included only in autonomous mode. `think` defaults to `false` and is changed at runtime with `/think-on` or `/think-off`. The expected response contains `message.role` and `message.content`; supported thinking models may also return `message.thinking`. OWRAP preserves reasoning separately from answer content and does not stream tokens.
+`format: "json"` is included only in agent mode. `think` defaults to `false` and is changed at runtime with `/think-on` or `/think-off`. The expected response contains `message.role` and `message.content`; supported thinking models may also return `message.thinking`. OWRAP preserves reasoning separately from answer content and does not stream tokens.
 
 The ordinary model/tool protocol uses one JSON object:
 
@@ -92,9 +92,9 @@ or:
 {"action":"run_command","command":"<command to execute>"}
 ```
 
-In normal chat, malformed or plain-text model output is displayed as an answer. In autonomous mode, valid JSON is mandatory and malformed output enters a retry flow.
+In normal chat, malformed or plain-text model output is displayed as an answer. In agent mode, valid JSON is mandatory and malformed output enters a retry flow.
 
-The HTTP client creates context-aware requests, so cancellation propagates to Ollama. The shared client has no fixed timeout and does not explicitly reject non-success HTTP status codes before decoding the response. Autonomous model calls add a two-minute context deadline; normal chat has no equivalent application deadline.
+The HTTP client creates context-aware requests, so cancellation propagates to Ollama. The shared client has no fixed timeout and does not explicitly reject non-success HTTP status codes before decoding the response. Agent model calls add a two-minute context deadline; normal chat has no equivalent application deadline.
 
 ## Core Data Model
 
@@ -118,11 +118,11 @@ The HTTP client creates context-aware requests, so cancellation propagates to Ol
 - Messages and stats.
 - Per-session auto-analysis flag.
 - Per-session thinking flag, default disabled.
-- An `AutonomousRun` snapshot with immutable prompt metadata, structured goal fields, detected environment capabilities, plan, compacted summary, candidate history, cumulative user requirements, status, limits, result, error, and sequenced events.
-- A runtime-only cancellation function for the active autonomous worker.
+- An `AgentRun` snapshot with immutable prompt metadata, structured goal fields, detected environment capabilities, plan, compacted summary, candidate history, cumulative user requirements, status, limits, result, error, and sequenced events.
+- A runtime-only cancellation function for the active agent worker.
 - Optional attachment metadata and temporary path.
 
-Autonomous run statuses are `running`, `waiting_approval`, `waiting_input`, `completed`, `failed`, `cancelled`, and `limit_reached`. Events record model actions, tool observations, rejected candidates, plan updates, critic verification, clarification, user feedback, approved answers, and failures in sequence order.
+Agent run statuses are `running`, `waiting_approval`, `waiting_input`, `completed`, `failed`, `cancelled`, and `limit_reached`. Events record model actions, tool observations, rejected candidates, plan updates, critic verification, clarification, user feedback, approved answers, and failures in sequence order.
 
 `ToolResponse` supports these action fields:
 
@@ -187,23 +187,23 @@ HTTP endpoints:
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/chat` | Normal chat, slash commands, tool actions, and jobs; rejected while an autonomous run is active |
+| `POST /api/chat` | Normal chat, slash commands, tool actions, and jobs; rejected while an agent run is active |
 | `GET`, `DELETE /api/state` | Restore or clear the shared active Web UI session |
 | `GET /api/prompt` | Active prompt, prompt name, model, and app version |
 | `GET /api/prompts/list` | Available `.txt` prompt files and current selection |
 | `POST /api/prompts/update` | Select a prompt file or submit custom prompt text |
 | `GET /api/help` | Web command help |
 | `POST /api/command` | Execute a caller-supplied command directly |
-| `POST /api/autonomous/start` | Start autonomous mode and optionally save an attachment |
-| `POST /api/autonomous/stop` | Stop autonomous mode and clean its temporary directory |
-| `GET /api/autonomous/status` | Return the current run snapshot and sequenced events |
-| `POST /api/autonomous/decision` | Continue from user feedback or accept a candidate answer |
+| `POST /api/agent/start` | Start agent mode and optionally save an attachment |
+| `POST /api/agent/stop` | Stop agent mode and clean its temporary directory |
+| `GET /api/agent/status` | Return the current run snapshot and sequenced events |
+| `POST /api/agent/decision` | Continue from user feedback or accept a candidate answer |
 | `GET /api/health` | Return HTTP 200 if the OWRAP server is running |
 | `GET /api/ollama/status` | Probe Ollama's `/api/tags` endpoint with a two-second timeout |
 
 Web chat recognizes `/auto-on`, `/auto-off`, `/think-on`, `/think-off`, `/last`, `/stats`, `/s`, `/allowedcomm`, `/save`, `/load`, `/sessions`, and `/list`. Web session save/load uses the same `~/.owrap/sessions` format as CLI mode.
 
-The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For autonomous work, JavaScript starts a run once and polls `/api/autonomous/status` every second; it observes sequenced events and submits stop, approval, revision-feedback, or clarification decisions but does not drive model iterations. Starting a run resets the global prompt and the run's immutable base prompt to the built-in `default`, then appends the domain-neutral JSON protocol from `prompts/autonomous_agent.txt`. Earlier chat and autonomous messages remain visible but are excluded from the run's token-budgeted event context. An `answer` is independently verified before changing the run to `waiting_approval`; rejected candidate text and critic feedback are returned to model context for revision. `request_clarification` changes the run to `waiting_input`. Normal chat remains disabled in both states. Malformed JSON, model-call errors, and unsupported actions share one three-attempt failure counter. Critic revisions do not consume that counter and remain bounded by the run's iteration and time limits. Tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
+The UI polls Ollama status every ten seconds, shows prompt/model/session statistics, supports dark/light theme state, displays reusable prompt history, and renders returned reasoning in a collapsed disclosure. For agent work, JavaScript starts a run once and polls `/api/agent/status` every second; it observes sequenced events and submits stop, approval, revision-feedback, or clarification decisions but does not drive model iterations. Starting a run resets the global prompt and the run's immutable base prompt to the built-in `default`, then appends the domain-neutral JSON protocol from `prompts/agent.txt`. Earlier chat and agent messages remain visible but are excluded from the run's token-budgeted event context. An `answer` is independently verified before changing the run to `waiting_approval`; rejected candidate text and critic feedback are returned to model context for revision. `request_clarification` changes the run to `waiting_input`. Normal chat remains disabled in both states. Malformed JSON, model-call errors, and unsupported actions share one three-attempt failure counter. Critic revisions do not consume that counter and remain bounded by the run's iteration and time limits. Tool failures become observations so the agent can choose another action. The thinking controls use a green selected state and status badge when enabled and amber when disabled. Returned reasoning persists in `~/.owrap/web_state.json`, but thinking mode resets to disabled whenever the application starts.
 
 ## Prompt System
 
@@ -218,11 +218,11 @@ Predefined files provide these roles:
 - `web_recon.txt`: authorized OWASP-oriented web reconnaissance assistant.
 - `shell_command_assistant.txt`: command-first local shell assistant.
 - `prompt_engineer.txt`: system-prompt design specialist.
-- `autonomous_agent.txt`: strict JSON autonomous worker.
+- `agent.txt`: strict JSON agent worker.
 
-The prompt directory is read from the current working directory at runtime. It is not embedded with the web UI. Distributions must therefore keep `prompts/` beside the running application, especially for autonomous mode.
+The prompt directory is read from the current working directory at runtime. It is not embedded with the web UI. Distributions must therefore keep `prompts/` beside the running application, especially for agent mode.
 
-Prompt selection for normal chat is global, not stored independently in each web session. Starting autonomous mode intentionally resets this global selection to the built-in `default`; the run captures that default and the selection remains `default` after autonomous mode ends.
+Prompt selection for normal chat is global, not stored independently in each web session. Starting agent mode intentionally resets this global selection to the built-in `default`; the run captures that default and the selection remains `default` after agent mode ends.
 
 In CLI mode, `/editsysprompt` updates the global prompt variables, but the already-created in-memory `messages` slice retains its original system message. Without rebuilding that slice, later model requests may continue to use the old prompt even though `/sysprompt` reports the new one.
 
@@ -256,21 +256,21 @@ A command containing `&&`, `||`, or `;` takes a different path and is executed w
 
 Background jobs have IDs like `job_<UnixNano>` and statuses `running`, `completed`, `failed`, `timeout`, or `cancelled`. Their output and errors remain in an in-memory global job store. Jobs can be listed by session, checked, fetched in full, or cancelled.
 
-## Autonomous Mode
+## Agent Mode
 
-Autonomous mode is beta and web-only. Its intended lifecycle is:
+Agent mode is beta and web-only. Its intended lifecycle is:
 
 1. The browser submits a required objective, optional expected output, constraints, completion criteria, and optional file attachment.
-2. The server creates or reuses a web session, resets the global prompt to the built-in default, and captures that default in a new `AutonomousRun`.
-3. Attachment content is written under `~/.owrap/autonomous_files/<session-id>/`.
+2. The server creates or reuses a web session, resets the global prompt to the built-in default, and captures that default in a new `AgentRun`.
+3. Attachment content is written under `~/.owrap/agent_files/<session-id>/`.
 4. The run is persisted before its backend worker starts.
-5. The worker composes the captured prompt with `prompts/autonomous_agent.txt`, the detected runtime capabilities, the current plan, the persisted summary, and recent token-budgeted events.
+5. The worker composes the captured prompt with `prompts/agent.txt`, the detected runtime capabilities, the current plan, the persisted summary, and recent token-budgeted events.
 6. The agent creates or updates a plan, runs commands, starts or checks run-owned jobs, records findings, asks for clarification, or returns a candidate answer.
 7. Clarification pauses in `waiting_input`; user feedback starts another worker.
 8. A separate critic verifies a candidate against the goal, plan, and evidence before it pauses in `waiting_approval`; revision feedback starts another worker, while acceptance completes the run.
 9. Stop, failure, cancellation, and limits terminate the worker, cancel run-owned jobs, and remove temporary attachments.
 
-Autonomous state management includes:
+Agent state management includes:
 
 - A complete persisted event log plus a 4096-token recent-event context budget.
 - Semantic compaction of older events into a persisted summary, with a 768-token summary instruction budget.
@@ -291,15 +291,15 @@ Autonomous state management includes:
 
 The server worker owns the loop. Closing or refreshing the browser does not stop progress while OWRAP remains running; the UI reconstructs it from persisted status and events.
 
-The autonomous prompt is designed for larger local models and insists on a single raw JSON object. It encourages different approaches after failures and a comprehensive final report only when the goal is complete or proven impossible.
+The agent prompt is designed for larger local models and insists on a single raw JSON object. It encourages different approaches after failures and a comprehensive final report only when the goal is complete or proven impossible.
 
 ## Persistence and Lifecycle
 
 CLI and web saves use JSON files in `~/.owrap/sessions`. An omitted name produces `owrap_YYYYMMDD_HHMM.json`; a supplied name receives `.json` if needed. Files are sorted alphabetically when listed.
 
-Starting OWRAP creates a fresh active Web conversation, removes stale autonomous attachments, and replaces `~/.owrap/web_state.json`. Only the active Web session is written there. Previous conversations remain available across application restarts only when explicitly saved under `~/.owrap/sessions` and restored with `/load`. Browser refreshes during the same process still restore the active chat and autonomous run. Background job process metadata remains memory-only.
+Starting OWRAP creates a fresh active Web conversation, removes stale agent attachments, and replaces `~/.owrap/web_state.json`. Only the active Web session is written there. Previous conversations remain available across application restarts only when explicitly saved under `~/.owrap/sessions` and restored with `/load`. Browser refreshes during the same process still restore the active chat and agent run. Background job process metadata remains memory-only.
 
-Autonomous attachments are temporary and terminal run cleanup removes the session directory. A waiting-approval or waiting-input run retains its attachment until it continues, is accepted where applicable, or is stopped.
+Agent attachments are temporary and terminal run cleanup removes the session directory. A waiting-approval or waiting-input run retains its attachment until it continues, is accepted where applicable, or is stopped.
 
 ## Build and Deployment
 
@@ -333,12 +333,12 @@ Do not infer guarantees beyond the behavior below when reviewing or modifying th
 
 ### Behavioral and Operational Gaps
 
-- **Normal Web prompt state is global.** Normal-chat sessions can change the shared selected prompt. Starting autonomous mode resets it to `default`, which also becomes the run's immutable base prompt.
-- **Normal Ollama calls have no fixed deadline.** Autonomous model calls are bounded to two minutes, but normal chat can wait indefinitely unless its request context is cancelled.
+- **Normal Web prompt state is global.** Normal-chat sessions can change the shared selected prompt. Starting agent mode resets it to `default`, which also becomes the run's immutable base prompt.
+- **Normal Ollama calls have no fixed deadline.** Agent model calls are bounded to two minutes, but normal chat can wait indefinitely unless its request context is cancelled.
 - **The shell-assistant prompt mentions `uname`, but the allowlist does not contain it.** Model guidance and executable capabilities can therefore diverge.
 - **CLI prompt editing does not rebuild existing context.** `/editsysprompt` changes displayed global state, while the existing CLI system message may remain unchanged.
 - **Statistics are approximate.** Some raw fallback responses and command-output messages are appended without incrementing assistant counters.
-- **Autonomous runs do not survive application restart.** Persisted active state supports browser refreshes during one process; startup intentionally creates a fresh chat instead of replaying work.
+- **Agent runs do not survive application restart.** Persisted active state supports browser refreshes during one process; startup intentionally creates a fresh chat instead of replaying work.
 - **Build metadata injection targets the wrong symbol.** The Makefile sets `main.Version`, while the source declares lowercase `version`.
 
 ## Guidance for Models Working on This Repository
@@ -359,24 +359,24 @@ Use the following priorities when analyzing or modifying OWRAP.
 - Trace the exact execution path for command, HTTP, upload, path, and concurrency changes; never treat the allowlist alone as a sandbox.
 - Do not claim a security property unless every command path and HTTP entry point enforces it.
 - Preserve saved-session compatibility when practical.
-- Keep autonomous actions strict and machine-readable. Protocol changes must cover the Go schema, prompt, worker, observer UI, persistence, and lifecycle tests together.
+- Keep agent actions strict and machine-readable. Protocol changes must cover the Go schema, prompt, worker, observer UI, persistence, and lifecycle tests together.
 
 ### Change Discipline
 
 - Prefer focused standard-library solutions consistent with the existing codebase.
-- Add tests proportionate to risk, especially for execution paths and autonomous state transitions.
+- Add tests proportionate to risk, especially for execution paths and agent state transitions.
 - Update `README.md` for operator-visible behavior and this document for architecture or model-contract changes.
 
 ## Compact Mental Model
 
 Think of OWRAP as five cooperating layers:
 
-1. **Interface layer:** terminal loop or browser JavaScript; the browser observes and controls autonomous runs.
+1. **Interface layer:** terminal loop or browser JavaScript; the browser observes and controls agent runs.
 2. **Conversation layer:** system prompt plus `ChatMessage` history and stats.
 3. **Model layer:** non-streaming Ollama `/api/chat` calls using a small JSON action protocol.
-4. **Action layer:** synchronous commands, background jobs, analysis calls, and autonomous state transitions.
+4. **Action layer:** synchronous commands, background jobs, analysis calls, and agent state transitions.
 5. **Persistence layer:** active Web state and saved sessions under `~/.owrap`, in-memory job state, and browser-local UI preferences.
 
-A normal request moves from interface to conversation to Ollama, then either returns an answer or enters command execution. In autonomous mode, a backend worker repeats strict action/observation steps until approval, manual stop, failure, cancellation, or a configured limit ends the run.
+A normal request moves from interface to conversation to Ollama, then either returns an answer or enters command execution. In agent mode, a backend worker repeats strict action/observation steps until approval, manual stop, failure, cancellation, or a configured limit ends the run.
 
 </application_context>

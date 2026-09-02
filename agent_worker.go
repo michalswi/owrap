@@ -16,28 +16,28 @@ import (
 )
 
 const (
-	autonomousMaxIterations  = 30
-	autonomousRunTimeout     = 30 * time.Minute
-	autonomousModelTimeout   = 2 * time.Minute
-	autonomousCommandTimeout = 2 * time.Minute
-	autonomousMaxObservation = 32 * 1024
-	autonomousContextTokens  = 4096
-	autonomousSummaryTokens  = 768
+	agentMaxIterations  = 30
+	agentRunTimeout     = 30 * time.Minute
+	agentModelTimeout   = 2 * time.Minute
+	agentCommandTimeout = 2 * time.Minute
+	agentMaxObservation = 32 * 1024
+	agentContextTokens  = 4096
+	agentSummaryTokens  = 768
 )
 
-type AutonomousRunStatus string
+type AgentRunStatus string
 
 const (
-	autonomousRunning         AutonomousRunStatus = "running"
-	autonomousWaitingApproval AutonomousRunStatus = "waiting_approval"
-	autonomousWaitingInput    AutonomousRunStatus = "waiting_input"
-	autonomousCompleted       AutonomousRunStatus = "completed"
-	autonomousFailed          AutonomousRunStatus = "failed"
-	autonomousCancelled       AutonomousRunStatus = "cancelled"
-	autonomousLimitReached    AutonomousRunStatus = "limit_reached"
+	agentRunning         AgentRunStatus = "running"
+	agentWaitingApproval AgentRunStatus = "waiting_approval"
+	agentWaitingInput    AgentRunStatus = "waiting_input"
+	agentCompleted       AgentRunStatus = "completed"
+	agentFailed          AgentRunStatus = "failed"
+	agentCancelled       AgentRunStatus = "cancelled"
+	agentLimitReached    AgentRunStatus = "limit_reached"
 )
 
-type AutonomousEvent struct {
+type AgentEvent struct {
 	Sequence         int       `json:"sequence"`
 	Kind             string    `json:"kind"`
 	Action           string    `json:"action,omitempty"`
@@ -51,70 +51,70 @@ type AutonomousEvent struct {
 	CreatedAt        time.Time `json:"createdAt"`
 }
 
-type AutonomousRun struct {
-	ID                  string               `json:"id"`
-	SessionID           string               `json:"sessionId"`
-	Goal                string               `json:"goal"`
-	GoalSpec            AutonomousGoalSpec   `json:"goalSpec"`
-	Status              AutonomousRunStatus  `json:"status"`
-	Iteration           int                  `json:"iteration"`
-	MaxIterations       int                  `json:"maxIterations"`
-	StartedAt           time.Time            `json:"startedAt"`
-	UpdatedAt           time.Time            `json:"updatedAt"`
-	CompletedAt         time.Time            `json:"completedAt,omitempty"`
-	BasePrompt          string               `json:"basePrompt"`
-	BasePromptName      string               `json:"basePromptName"`
-	FinalAnswer         string               `json:"finalAnswer,omitempty"`
-	Error               string               `json:"error,omitempty"`
-	Events              []AutonomousEvent    `json:"events"`
-	ConsecutiveErrors   int                  `json:"consecutiveErrors"`
-	AvailableCommands   []string             `json:"availableCommands"`
-	UnavailableCommands []string             `json:"unavailableCommands,omitempty"`
-	WorkingDirectory    string               `json:"workingDirectory"`
-	OperatingSystem     string               `json:"operatingSystem"`
-	ContextSummary      string               `json:"contextSummary,omitempty"`
-	CompactedThrough    int                  `json:"compactedThrough,omitempty"`
-	Plan                []AutonomousPlanStep `json:"plan,omitempty"`
-	CandidateHistory    []string             `json:"candidateHistory,omitempty"`
-	UserRequirements    []string             `json:"userRequirements,omitempty"`
+type AgentRun struct {
+	ID                  string          `json:"id"`
+	SessionID           string          `json:"sessionId"`
+	Goal                string          `json:"goal"`
+	GoalSpec            AgentGoalSpec   `json:"goalSpec"`
+	Status              AgentRunStatus  `json:"status"`
+	Iteration           int             `json:"iteration"`
+	MaxIterations       int             `json:"maxIterations"`
+	StartedAt           time.Time       `json:"startedAt"`
+	UpdatedAt           time.Time       `json:"updatedAt"`
+	CompletedAt         time.Time       `json:"completedAt,omitempty"`
+	BasePrompt          string          `json:"basePrompt"`
+	BasePromptName      string          `json:"basePromptName"`
+	FinalAnswer         string          `json:"finalAnswer,omitempty"`
+	Error               string          `json:"error,omitempty"`
+	Events              []AgentEvent    `json:"events"`
+	ConsecutiveErrors   int             `json:"consecutiveErrors"`
+	AvailableCommands   []string        `json:"availableCommands"`
+	UnavailableCommands []string        `json:"unavailableCommands,omitempty"`
+	WorkingDirectory    string          `json:"workingDirectory"`
+	OperatingSystem     string          `json:"operatingSystem"`
+	ContextSummary      string          `json:"contextSummary,omitempty"`
+	CompactedThrough    int             `json:"compactedThrough,omitempty"`
+	Plan                []AgentPlanStep `json:"plan,omitempty"`
+	CandidateHistory    []string        `json:"candidateHistory,omitempty"`
+	UserRequirements    []string        `json:"userRequirements,omitempty"`
 }
 
-type AutonomousPlanStep struct {
+type AgentPlanStep struct {
 	ID               int    `json:"id"`
 	Description      string `json:"description"`
 	Status           string `json:"status"`
 	EvidenceEventIDs []int  `json:"evidenceEventIds,omitempty"`
 }
 
-type AutonomousVerification struct {
+type AgentVerification struct {
 	Approved         bool   `json:"approved"`
 	Feedback         string `json:"feedback"`
 	EvidenceEventIDs []int  `json:"evidenceEventIds,omitempty"`
 }
 
-type AutonomousGoalSpec struct {
+type AgentGoalSpec struct {
 	Objective          string `json:"objective"`
 	ExpectedOutput     string `json:"expectedOutput"`
 	Constraints        string `json:"constraints,omitempty"`
 	CompletionCriteria string `json:"completionCriteria"`
 }
 
-func newAutonomousRun(sessionID, goal, basePrompt, basePromptName string) *AutonomousRun {
+func newAgentRun(sessionID, goal, basePrompt, basePromptName string) *AgentRun {
 	now := time.Now().UTC()
-	available, unavailable := detectAutonomousCommands()
+	available, unavailable := detectAgentCommands()
 	workingDirectory, _ := os.Getwd()
-	return &AutonomousRun{
+	return &AgentRun{
 		ID:                  fmt.Sprintf("run_%d", time.Now().UnixNano()),
 		SessionID:           sessionID,
 		Goal:                goal,
-		GoalSpec:            normalizeAutonomousGoalSpec(AutonomousGoalSpec{Objective: goal}),
-		Status:              autonomousRunning,
-		MaxIterations:       autonomousMaxIterations,
+		GoalSpec:            normalizeAgentGoalSpec(AgentGoalSpec{Objective: goal}),
+		Status:              agentRunning,
+		MaxIterations:       agentMaxIterations,
 		StartedAt:           now,
 		UpdatedAt:           now,
 		BasePrompt:          basePrompt,
 		BasePromptName:      basePromptName,
-		Events:              make([]AutonomousEvent, 0),
+		Events:              make([]AgentEvent, 0),
 		AvailableCommands:   available,
 		UnavailableCommands: unavailable,
 		WorkingDirectory:    workingDirectory,
@@ -122,7 +122,7 @@ func newAutonomousRun(sessionID, goal, basePrompt, basePromptName string) *Auton
 	}
 }
 
-func detectAutonomousCommands() ([]string, []string) {
+func detectAgentCommands() ([]string, []string) {
 	available := make([]string, 0, len(allowedCommands))
 	unavailable := make([]string, 0)
 	for _, command := range allowedCommandsList() {
@@ -135,7 +135,7 @@ func detectAutonomousCommands() ([]string, []string) {
 	return available, unavailable
 }
 
-func normalizeAutonomousGoalSpec(spec AutonomousGoalSpec) AutonomousGoalSpec {
+func normalizeAgentGoalSpec(spec AgentGoalSpec) AgentGoalSpec {
 	spec.Objective = strings.TrimSpace(spec.Objective)
 	spec.ExpectedOutput = strings.TrimSpace(spec.ExpectedOutput)
 	spec.Constraints = strings.TrimSpace(spec.Constraints)
@@ -149,141 +149,141 @@ func normalizeAutonomousGoalSpec(spec AutonomousGoalSpec) AutonomousGoalSpec {
 	return spec
 }
 
-func autonomousGoalDescription(run *AutonomousRun) string {
-	spec := normalizeAutonomousGoalSpec(run.GoalSpec)
-	return fmt.Sprintf("OBJECTIVE:\n%s\n\nEXPECTED OUTPUT:\n%s\n\nCONSTRAINTS:\n%s\n\nCOMPLETION CRITERIA:\n%s", spec.Objective, spec.ExpectedOutput, emptyAutonomousValue(spec.Constraints), spec.CompletionCriteria)
+func agentGoalDescription(run *AgentRun) string {
+	spec := normalizeAgentGoalSpec(run.GoalSpec)
+	return fmt.Sprintf("OBJECTIVE:\n%s\n\nEXPECTED OUTPUT:\n%s\n\nCONSTRAINTS:\n%s\n\nCOMPLETION CRITERIA:\n%s", spec.Objective, spec.ExpectedOutput, emptyAgentValue(spec.Constraints), spec.CompletionCriteria)
 }
 
-func emptyAutonomousValue(value string) string {
+func emptyAgentValue(value string) string {
 	if value == "" {
 		return "None specified."
 	}
 	return value
 }
 
-func (s *webSession) appendAutonomousEvent(event AutonomousEvent) {
+func (s *webSession) appendAgentEvent(event AgentEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.AutonomousRun == nil {
+	if s.AgentRun == nil {
 		return
 	}
-	event.Sequence = len(s.AutonomousRun.Events) + 1
+	event.Sequence = len(s.AgentRun.Events) + 1
 	event.CreatedAt = time.Now().UTC()
-	s.AutonomousRun.Events = append(s.AutonomousRun.Events, event)
-	s.AutonomousRun.UpdatedAt = event.CreatedAt
+	s.AgentRun.Events = append(s.AgentRun.Events, event)
+	s.AgentRun.UpdatedAt = event.CreatedAt
 }
 
-func (s *webSession) autonomousSnapshot() *AutonomousRun {
+func (s *webSession) agentSnapshot() *AgentRun {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.AutonomousRun == nil {
+	if s.AgentRun == nil {
 		return nil
 	}
-	snapshot := *s.AutonomousRun
-	snapshot.Events = append([]AutonomousEvent(nil), s.AutonomousRun.Events...)
-	snapshot.CandidateHistory = append([]string(nil), s.AutonomousRun.CandidateHistory...)
-	snapshot.UserRequirements = append([]string(nil), s.AutonomousRun.UserRequirements...)
+	snapshot := *s.AgentRun
+	snapshot.Events = append([]AgentEvent(nil), s.AgentRun.Events...)
+	snapshot.CandidateHistory = append([]string(nil), s.AgentRun.CandidateHistory...)
+	snapshot.UserRequirements = append([]string(nil), s.AgentRun.UserRequirements...)
 	return &snapshot
 }
 
-func (s *webSession) finishAutonomousRun(status AutonomousRunStatus, answer, errorText string) {
+func (s *webSession) finishAgentRun(status AgentRunStatus, answer, errorText string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.AutonomousRun == nil {
+	if s.AgentRun == nil {
 		return
 	}
 	now := time.Now().UTC()
-	s.AutonomousRun.Status = status
-	s.AutonomousRun.FinalAnswer = answer
-	s.AutonomousRun.Error = errorText
-	s.AutonomousRun.UpdatedAt = now
-	s.AutonomousRun.CompletedAt = now
-	s.AutonomousMode = status == autonomousRunning || status == autonomousWaitingApproval || status == autonomousWaitingInput
+	s.AgentRun.Status = status
+	s.AgentRun.FinalAnswer = answer
+	s.AgentRun.Error = errorText
+	s.AgentRun.UpdatedAt = now
+	s.AgentRun.CompletedAt = now
+	s.AgentMode = status == agentRunning || status == agentWaitingApproval || status == agentWaitingInput
 }
 
-func (s *webSession) cancelAutonomousRun() {
+func (s *webSession) cancelAgentRun() {
 	s.mu.Lock()
-	cancel := s.autonomousCancel
+	cancel := s.agentCancel
 	s.mu.Unlock()
 	if cancel != nil {
 		cancel()
 	}
 }
 
-func autonomousRunContext() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), autonomousRunTimeout)
+func agentRunContext() (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), agentRunTimeout)
 }
 
-func runAutonomousAgent(ctx context.Context, sess *webSession) {
-	sess.appendAutonomousEvent(AutonomousEvent{Kind: "status", Text: "Autonomous run started"})
+func runAgent(ctx context.Context, sess *webSession) {
+	sess.appendAgentEvent(AgentEvent{Kind: "status", Text: "Agent run started"})
 	defer func() {
 		if err := webStore.persist(); err != nil {
-			logAutonomousError(sess.ID, err)
+			logAgentError(sess.ID, err)
 		}
 	}()
 
 	for {
-		run := sess.autonomousSnapshot()
-		if run == nil || run.Status != autonomousRunning {
+		run := sess.agentSnapshot()
+		if run == nil || run.Status != agentRunning {
 			return
 		}
 		if run.Iteration >= run.MaxIterations {
-			finishAutonomous(sess, autonomousLimitReached, "", "maximum iteration limit reached")
+			finishAgent(sess, agentLimitReached, "", "maximum iteration limit reached")
 			return
 		}
 		select {
 		case <-ctx.Done():
-			status := autonomousCancelled
+			status := agentCancelled
 			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				status = autonomousLimitReached
+				status = agentLimitReached
 			}
-			finishAutonomous(sess, status, "", ctx.Err().Error())
+			finishAgent(sess, status, "", ctx.Err().Error())
 			return
 		default:
 		}
 
 		sess.mu.Lock()
-		sess.AutonomousRun.Iteration++
-		sess.AutonomousRun.UpdatedAt = time.Now().UTC()
+		sess.AgentRun.Iteration++
+		sess.AgentRun.UpdatedAt = time.Now().UTC()
 		sess.mu.Unlock()
-		compactAutonomousContext(ctx, sess)
+		compactAgentContext(ctx, sess)
 
-		messages, err := autonomousMessages(sess)
+		messages, err := agentMessages(sess)
 		if err != nil {
-			finishAutonomous(sess, autonomousFailed, "", err.Error())
+			finishAgent(sess, agentFailed, "", err.Error())
 			return
 		}
-		modelCtx, cancel := context.WithTimeout(ctx, autonomousModelTimeout)
-		response, err := callOllamaMessageWithLogContext(modelCtx, "autonomous:"+run.ID, messages, true, sess.ThinkingEnabled)
+		modelCtx, cancel := context.WithTimeout(ctx, agentModelTimeout)
+		response, err := callOllamaMessageWithLogContext(modelCtx, "agent:"+run.ID, messages, true, sess.ThinkingEnabled)
 		cancel()
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			if !recordAutonomousFailure(sess, "model request failed: "+err.Error()) {
+			if !recordAgentFailure(sess, "model request failed: "+err.Error()) {
 				return
 			}
 			continue
 		}
 
-		action, err := parseAutonomousAction(response.Content)
+		action, err := parseAgentAction(response.Content)
 		if err != nil {
-			sess.appendAutonomousEvent(AutonomousEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
-			if !recordAutonomousFailure(sess, err.Error()) {
+			sess.appendAgentEvent(AgentEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
+			if !recordAgentFailure(sess, err.Error()) {
 				return
 			}
 			continue
 		}
-		if err := validateAutonomousActionState(sess, run, action); err != nil {
-			sess.appendAutonomousEvent(AutonomousEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
-			if !recordAutonomousFailure(sess, err.Error()) {
+		if err := validateAgentActionState(sess, run, action); err != nil {
+			sess.appendAgentEvent(AgentEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
+			if !recordAgentFailure(sess, err.Error()) {
 				return
 			}
 			continue
 		}
-		if command, required := autonomousCommandRecoveryRequired(run.Events); required && action.Action != "run_command" {
+		if command, required := agentCommandRecoveryRequired(run.Events); required && action.Action != "run_command" {
 			message := fmt.Sprintf("The latest command attempt failed: %q. Inspect its observation. Your next action must be run_command with a corrected or alternative command.", command)
-			if !recordAutonomousRevision(sess, message, nil) {
+			if !recordAgentRevision(sess, message, nil) {
 				return
 			}
 			continue
@@ -291,23 +291,23 @@ func runAutonomousAgent(ctx context.Context, sess *webSession) {
 		if action.Action == "answer" {
 			if goalRequiresCodeDeliverable(run) && !candidateHasCodeBlock(action.Text) {
 				message := "The goal requires source code, but the candidate contains no non-empty fenced code block. Return the complete runnable code directly in the answer."
-				sess.appendAutonomousEvent(AutonomousEvent{Kind: "candidate", Action: "answer", Text: action.Text, Thinking: response.Thinking})
-				if !recordAutonomousRevision(sess, message, nil) {
+				sess.appendAgentEvent(AgentEvent{Kind: "candidate", Action: "answer", Text: action.Text, Thinking: response.Thinking})
+				if !recordAgentRevision(sess, message, nil) {
 					return
 				}
 				continue
 			}
 			if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
 				message := fmt.Sprintf("goal requires executing %q before answering; return run_command with that command", command)
-				sess.appendAutonomousEvent(AutonomousEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
-				if !recordAutonomousFailure(sess, message) {
+				sess.appendAgentEvent(AgentEvent{Kind: "invalid_action", Text: response.Content, Thinking: response.Thinking})
+				if !recordAgentFailure(sess, message) {
 					return
 				}
 				continue
 			}
-			verification, err := verifyAutonomousAnswer(ctx, sess, action.Text)
+			verification, err := verifyAgentAnswer(ctx, sess, action.Text)
 			if err != nil {
-				if !recordAutonomousFailure(sess, "answer verification failed: "+err.Error()) {
+				if !recordAgentFailure(sess, "answer verification failed: "+err.Error()) {
 					return
 				}
 				continue
@@ -317,45 +317,45 @@ func runAutonomousAgent(ctx context.Context, sess *webSession) {
 				if feedback == "" {
 					feedback = "Candidate answer did not satisfy the goal and completion criteria."
 				}
-				sess.appendAutonomousEvent(AutonomousEvent{Kind: "candidate", Action: "answer", Text: action.Text, Thinking: response.Thinking})
-				if !recordAutonomousRevision(sess, feedback, verification.EvidenceEventIDs) {
+				sess.appendAgentEvent(AgentEvent{Kind: "candidate", Action: "answer", Text: action.Text, Thinking: response.Thinking})
+				if !recordAgentRevision(sess, feedback, verification.EvidenceEventIDs) {
 					return
 				}
 				continue
 			}
 			action.EvidenceEventIDs = append([]int(nil), verification.EvidenceEventIDs...)
 		}
-		resetAutonomousFailures(sess)
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "action", Action: action.Action, Text: action.Text, Command: action.Command, EvidenceEventIDs: action.EvidenceEventIDs, Thinking: response.Thinking})
+		resetAgentFailures(sess)
+		sess.appendAgentEvent(AgentEvent{Kind: "action", Action: action.Action, Text: action.Text, Command: action.Command, EvidenceEventIDs: action.EvidenceEventIDs, Thinking: response.Thinking})
 		if err := webStore.persist(); err != nil {
-			finishAutonomous(sess, autonomousFailed, "", "could not persist action before execution: "+err.Error())
+			finishAgent(sess, agentFailed, "", "could not persist action before execution: "+err.Error())
 			return
 		}
 
-		if !executeAutonomousAction(ctx, sess, action) {
+		if !executeAgentAction(ctx, sess, action) {
 			return
 		}
 		if err := webStore.persist(); err != nil {
-			logAutonomousError(sess.ID, err)
+			logAgentError(sess.ID, err)
 		}
 	}
 }
 
-func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
-	run := sess.autonomousSnapshot()
+func agentMessages(sess *webSession) ([]ChatMessage, error) {
+	run := sess.agentSnapshot()
 	if run == nil {
-		return nil, errors.New("autonomous run not found")
+		return nil, errors.New("agent run not found")
 	}
 	history := "Recent events are provided as conversation messages below."
 	if run.ContextSummary != "" {
 		history = "Earlier event summary:\n" + run.ContextSummary + "\n\n" + history
 	}
-	prompt, err := composeAutonomousPrompt(run.BasePrompt, autonomousGoalDescription(run), history)
+	prompt, err := composeAgentPrompt(run.BasePrompt, agentGoalDescription(run), history)
 	if err != nil {
 		return nil, err
 	}
-	prompt += fmt.Sprintf("\n\nEXECUTION ENVIRONMENT:\nOS: %s\nWorking directory: %s\nCommands installed and allowed: %s\nAllowed but unavailable: %s\nCommands run with the same filesystem and network permissions as the OWRAP process.", run.OperatingSystem, run.WorkingDirectory, strings.Join(run.AvailableCommands, ", "), emptyAutonomousValue(strings.Join(run.UnavailableCommands, ", ")))
-	if revisionContext := autonomousRevisionContext(run); revisionContext != "" {
+	prompt += fmt.Sprintf("\n\nEXECUTION ENVIRONMENT:\nOS: %s\nWorking directory: %s\nCommands installed and allowed: %s\nAllowed but unavailable: %s\nCommands run with the same filesystem and network permissions as the OWRAP process.", run.OperatingSystem, run.WorkingDirectory, strings.Join(run.AvailableCommands, ", "), emptyAgentValue(strings.Join(run.UnavailableCommands, ", ")))
+	if revisionContext := agentRevisionContext(run); revisionContext != "" {
 		prompt += "\n\nREVISION CONTEXT:\n" + revisionContext + "\nReturn a self-contained candidate containing the complete updated deliverable. Never claim that a previous response contains a requested change; include the changed result in this answer."
 	}
 	if len(run.Plan) > 0 {
@@ -366,13 +366,13 @@ func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
 	if command := requiredGoalCommand(run); command != "" && !hasCommandObservation(run.Events, command) {
 		messages[0].Content += fmt.Sprintf("\n\nEXECUTION REQUIREMENT: The goal explicitly requires %q. You must return run_command using %q and inspect its real output before returning answer. A description, refusal, or hypothetical result is not completion.", command, command)
 	}
-	if command, required := autonomousCommandRecoveryRequired(run.Events); required {
+	if command, required := agentCommandRecoveryRequired(run.Events); required {
 		messages[0].Content += fmt.Sprintf("\n\nCOMMAND RECOVERY REQUIREMENT: The latest command attempt failed: %q. Your next action must be run_command with corrected syntax or an alternative command. Do not answer, update findings, change the plan, or request clarification before making that attempt.", command)
 	}
 	if run.ContextSummary != "" {
 		messages = append(messages, ChatMessage{Role: "user", Content: "Earlier run summary:\n" + run.ContextSummary})
 	}
-	for _, event := range selectAutonomousContextEvents(run.Events, run.CompactedThrough, autonomousContextTokens) {
+	for _, event := range selectAgentContextEvents(run.Events, run.CompactedThrough, agentContextTokens) {
 		switch event.Kind {
 		case "action", "invalid_action":
 			if event.Kind == "invalid_action" {
@@ -405,8 +405,8 @@ func autonomousMessages(sess *webSession) ([]ChatMessage, error) {
 	return messages, nil
 }
 
-func requiredGoalCommand(run *AutonomousRun) string {
-	for _, field := range autonomousGoalFields(run.Goal) {
+func requiredGoalCommand(run *AgentRun) string {
+	for _, field := range agentGoalFields(run.Goal) {
 		if allowedCommands[field] {
 			return field
 		}
@@ -414,13 +414,13 @@ func requiredGoalCommand(run *AutonomousRun) string {
 	return ""
 }
 
-func autonomousGoalFields(goal string) []string {
+func agentGoalFields(goal string) []string {
 	return strings.FieldsFunc(strings.ToLower(goal), func(r rune) bool {
 		return !(r >= 'a' && r <= 'z') && !(r >= '0' && r <= '9') && r != '_' && r != '-'
 	})
 }
 
-func hasCommandObservation(events []AutonomousEvent, requiredCommand string) bool {
+func hasCommandObservation(events []AgentEvent, requiredCommand string) bool {
 	for _, event := range events {
 		if event.Kind != "observation" || event.Action != "run_command" || !event.Success {
 			continue
@@ -433,7 +433,7 @@ func hasCommandObservation(events []AutonomousEvent, requiredCommand string) boo
 	return false
 }
 
-func goalRequiresCodeDeliverable(run *AutonomousRun) bool {
+func goalRequiresCodeDeliverable(run *AgentRun) bool {
 	text := strings.ToLower(strings.Join([]string{run.GoalSpec.Objective, run.GoalSpec.ExpectedOutput, run.GoalSpec.CompletionCriteria}, " "))
 	creationVerb := false
 	for _, verb := range []string{"write", "develop", "build", "implement", "create", "generate"} {
@@ -467,7 +467,7 @@ func candidateHasCodeBlock(candidate string) bool {
 	return end > 0 && strings.TrimSpace(candidate[contentStart:contentStart+end]) != ""
 }
 
-func latestAutonomousCommandFailure(events []AutonomousEvent) (string, bool) {
+func latestAgentCommandFailure(events []AgentEvent) (string, bool) {
 	for index := len(events) - 1; index >= 0; index-- {
 		event := events[index]
 		if event.Kind == "observation" && event.Action == "run_command" {
@@ -477,12 +477,12 @@ func latestAutonomousCommandFailure(events []AutonomousEvent) (string, bool) {
 	return "", false
 }
 
-func autonomousCommandRecoveryRequired(events []AutonomousEvent) (string, bool) {
-	command, failed := latestAutonomousCommandFailure(events)
-	return command, failed && consecutiveAutonomousCommandFailures(events) < 2
+func agentCommandRecoveryRequired(events []AgentEvent) (string, bool) {
+	command, failed := latestAgentCommandFailure(events)
+	return command, failed && consecutiveAgentCommandFailures(events) < 2
 }
 
-func consecutiveAutonomousCommandFailures(events []AutonomousEvent) int {
+func consecutiveAgentCommandFailures(events []AgentEvent) int {
 	failures := 0
 	for index := len(events) - 1; index >= 0; index-- {
 		event := events[index]
@@ -497,7 +497,7 @@ func consecutiveAutonomousCommandFailures(events []AutonomousEvent) int {
 	return failures
 }
 
-func validateAutonomousActionState(sess *webSession, run *AutonomousRun, action ToolResponse) error {
+func validateAgentActionState(sess *webSession, run *AgentRun, action ToolResponse) error {
 	if action.Action == "check_job" || action.Action == "get_job" || action.Action == "cancel_job" {
 		job, ok := jobStore.get(action.JobID)
 		if !ok || job.SessionID != sess.ID || job.RunID != run.ID {
@@ -517,117 +517,117 @@ func validateAutonomousActionState(sess *webSession, run *AutonomousRun, action 
 	return nil
 }
 
-func autonomousEventHistory(events []AutonomousEvent) string {
+func agentEventHistory(events []AgentEvent) string {
 	if len(events) == 0 {
 		return "No previous attempts yet."
 	}
 	var history strings.Builder
 	for _, event := range events {
-		fmt.Fprintf(&history, "%d. %s %s %s\n", event.Sequence, event.Kind, event.Action, truncateAutonomousText(event.Text+event.Output))
+		fmt.Fprintf(&history, "%d. %s %s %s\n", event.Sequence, event.Kind, event.Action, truncateAgentText(event.Text+event.Output))
 	}
 	return history.String()
 }
 
-func estimateAutonomousTokens(text string) int {
+func estimateAgentTokens(text string) int {
 	if text == "" {
 		return 0
 	}
 	return (len(text) + 3) / 4
 }
 
-func autonomousEventText(event AutonomousEvent) string {
+func agentEventText(event AgentEvent) string {
 	data, _ := json.Marshal(event)
 	return string(data)
 }
 
-func selectAutonomousContextEvents(events []AutonomousEvent, compactedThrough, tokenBudget int) []AutonomousEvent {
+func selectAgentContextEvents(events []AgentEvent, compactedThrough, tokenBudget int) []AgentEvent {
 	selectedStart := len(events)
 	used := 0
 	for index := len(events) - 1; index >= 0; index-- {
 		if events[index].Sequence <= compactedThrough {
 			break
 		}
-		tokens := estimateAutonomousTokens(autonomousEventText(events[index]))
+		tokens := estimateAgentTokens(agentEventText(events[index]))
 		if selectedStart < len(events) && used+tokens > tokenBudget {
 			break
 		}
 		selectedStart = index
 		used += tokens
 	}
-	return append([]AutonomousEvent(nil), events[selectedStart:]...)
+	return append([]AgentEvent(nil), events[selectedStart:]...)
 }
 
-func compactAutonomousContext(ctx context.Context, sess *webSession) {
-	run := sess.autonomousSnapshot()
+func compactAgentContext(ctx context.Context, sess *webSession) {
+	run := sess.agentSnapshot()
 	if run == nil {
 		return
 	}
-	pending := make([]AutonomousEvent, 0)
+	pending := make([]AgentEvent, 0)
 	totalTokens := 0
 	for _, event := range run.Events {
 		if event.Sequence <= run.CompactedThrough {
 			continue
 		}
 		pending = append(pending, event)
-		totalTokens += estimateAutonomousTokens(autonomousEventText(event))
+		totalTokens += estimateAgentTokens(agentEventText(event))
 	}
-	if len(pending) < 2 || totalTokens <= autonomousContextTokens {
+	if len(pending) < 2 || totalTokens <= agentContextTokens {
 		return
 	}
-	keep := selectAutonomousContextEvents(pending, 0, autonomousContextTokens/2)
+	keep := selectAgentContextEvents(pending, 0, agentContextTokens/2)
 	compactCount := len(pending) - len(keep)
 	if compactCount <= 0 {
 		return
 	}
 	toCompact := pending[:compactCount]
-	summaryInput := truncateAutonomousText(autonomousEventHistory(toCompact))
+	summaryInput := truncateAgentText(agentEventHistory(toCompact))
 	summaryMessages := []ChatMessage{
-		{Role: "system", Content: fmt.Sprintf("Summarize autonomous-agent history in at most %d tokens. Preserve verified facts, failed approaches, unresolved questions, user constraints, and job IDs. Do not invent information.", autonomousSummaryTokens)},
-		{Role: "user", Content: "Existing summary:\n" + emptyAutonomousValue(run.ContextSummary) + "\n\nEvents to compact:\n" + summaryInput},
+		{Role: "system", Content: fmt.Sprintf("Summarize agent-agent history in at most %d tokens. Preserve verified facts, failed approaches, unresolved questions, user constraints, and job IDs. Do not invent information.", agentSummaryTokens)},
+		{Role: "user", Content: "Existing summary:\n" + emptyAgentValue(run.ContextSummary) + "\n\nEvents to compact:\n" + summaryInput},
 	}
-	summaryCtx, cancel := context.WithTimeout(ctx, autonomousModelTimeout)
-	response, err := callOllamaMessageWithLogContext(summaryCtx, "autonomous-summary:"+run.ID, summaryMessages, false, false)
+	summaryCtx, cancel := context.WithTimeout(ctx, agentModelTimeout)
+	response, err := callOllamaMessageWithLogContext(summaryCtx, "agent-summary:"+run.ID, summaryMessages, false, false)
 	cancel()
 	summary := strings.TrimSpace(response.Content)
 	if err != nil || summary == "" {
-		summary = truncateAutonomousText(run.ContextSummary + "\n" + summaryInput)
+		summary = truncateAgentText(run.ContextSummary + "\n" + summaryInput)
 	}
 	sess.mu.Lock()
-	if sess.AutonomousRun != nil && sess.AutonomousRun.ID == run.ID {
-		sess.AutonomousRun.ContextSummary = summary
-		sess.AutonomousRun.CompactedThrough = toCompact[len(toCompact)-1].Sequence
-		sess.AutonomousRun.UpdatedAt = time.Now().UTC()
+	if sess.AgentRun != nil && sess.AgentRun.ID == run.ID {
+		sess.AgentRun.ContextSummary = summary
+		sess.AgentRun.CompactedThrough = toCompact[len(toCompact)-1].Sequence
+		sess.AgentRun.UpdatedAt = time.Now().UTC()
 	}
 	sess.mu.Unlock()
 }
 
-func verifyAutonomousAnswer(ctx context.Context, sess *webSession, candidate string) (AutonomousVerification, error) {
-	run := sess.autonomousSnapshot()
+func verifyAgentAnswer(ctx context.Context, sess *webSession, candidate string) (AgentVerification, error) {
+	run := sess.agentSnapshot()
 	if run == nil {
-		return AutonomousVerification{}, errors.New("autonomous run not found")
+		return AgentVerification{}, errors.New("agent run not found")
 	}
-	evidence := autonomousCriticEvidence(selectAutonomousContextEvents(run.Events, run.CompactedThrough, autonomousContextTokens))
+	evidence := agentCriticEvidence(selectAgentContextEvents(run.Events, run.CompactedThrough, agentContextTokens))
 	evidenceJSON, _ := json.Marshal(evidence)
 	planJSON, _ := json.Marshal(run.Plan)
-	revisionContext := autonomousRevisionContext(run)
+	revisionContext := agentRevisionContext(run)
 	messages := []ChatMessage{
-		{Role: "system", Content: "You are an independent critic. Verify the exact candidate autonomous-agent answer against the objective, expected output, constraints, completion criteria, plan, user feedback, and recorded events. Approve only if the candidate itself contains the complete requested deliverable. Never assume promised, described, or omitted content exists; a preamble without its claimed output is incomplete. Return exactly one JSON object: {\"approved\":true|false,\"feedback\":\"specific reason or empty\",\"evidenceEventIds\":[1,2]}. Cite only event IDs that directly support the answer. Knowledge-only answers may use an empty evidence list."},
-		{Role: "user", Content: autonomousGoalDescription(run) + "\n\nREVISION CONTEXT:\n" + revisionContext + "\n\nPLAN:\n" + string(planJSON) + "\n\nCANDIDATE ANSWER:\n" + candidate + "\n\nRECORDED EVENTS:\n" + string(evidenceJSON)},
+		{Role: "system", Content: "You are an independent critic. Verify the exact candidate agent-agent answer against the objective, expected output, constraints, completion criteria, plan, user feedback, and recorded events. Approve only if the candidate itself contains the complete requested deliverable. Never assume promised, described, or omitted content exists; a preamble without its claimed output is incomplete. Return exactly one JSON object: {\"approved\":true|false,\"feedback\":\"specific reason or empty\",\"evidenceEventIds\":[1,2]}. Cite only event IDs that directly support the answer. Knowledge-only answers may use an empty evidence list."},
+		{Role: "user", Content: agentGoalDescription(run) + "\n\nREVISION CONTEXT:\n" + revisionContext + "\n\nPLAN:\n" + string(planJSON) + "\n\nCANDIDATE ANSWER:\n" + candidate + "\n\nRECORDED EVENTS:\n" + string(evidenceJSON)},
 	}
-	verifyCtx, cancel := context.WithTimeout(ctx, autonomousModelTimeout)
-	response, err := callOllamaMessageWithLogContext(verifyCtx, "autonomous-critic:"+run.ID, messages, true, false)
+	verifyCtx, cancel := context.WithTimeout(ctx, agentModelTimeout)
+	response, err := callOllamaMessageWithLogContext(verifyCtx, "agent-critic:"+run.ID, messages, true, false)
 	cancel()
 	if err != nil {
-		return AutonomousVerification{}, err
+		return AgentVerification{}, err
 	}
 	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(response.Content)))
 	decoder.DisallowUnknownFields()
-	var verification AutonomousVerification
+	var verification AgentVerification
 	if err := decoder.Decode(&verification); err != nil {
-		return AutonomousVerification{}, fmt.Errorf("invalid critic JSON: %w", err)
+		return AgentVerification{}, fmt.Errorf("invalid critic JSON: %w", err)
 	}
 	if decoder.Decode(&struct{}{}) != io.EOF {
-		return AutonomousVerification{}, errors.New("critic response must contain exactly one JSON object")
+		return AgentVerification{}, errors.New("critic response must contain exactly one JSON object")
 	}
 	for _, step := range run.Plan {
 		if verification.Approved && step.Status != "completed" {
@@ -637,7 +637,7 @@ func verifyAutonomousAnswer(ctx context.Context, sess *webSession, candidate str
 	}
 	for _, eventID := range verification.EvidenceEventIDs {
 		if eventID <= 0 || eventID > len(run.Events) {
-			return AutonomousVerification{}, fmt.Errorf("critic cited nonexistent event %d", eventID)
+			return AgentVerification{}, fmt.Errorf("critic cited nonexistent event %d", eventID)
 		}
 	}
 	if command := requiredGoalCommand(run); verification.Approved && command != "" && !evidenceSupportsCommand(run.Events, verification.EvidenceEventIDs, command) {
@@ -647,8 +647,8 @@ func verifyAutonomousAnswer(ctx context.Context, sess *webSession, candidate str
 	return verification, nil
 }
 
-func autonomousCriticEvidence(events []AutonomousEvent) []AutonomousEvent {
-	evidence := make([]AutonomousEvent, 0, len(events))
+func agentCriticEvidence(events []AgentEvent) []AgentEvent {
+	evidence := make([]AgentEvent, 0, len(events))
 	for _, event := range events {
 		switch event.Kind {
 		case "observation", "feedback", "plan":
@@ -658,7 +658,7 @@ func autonomousCriticEvidence(events []AutonomousEvent) []AutonomousEvent {
 	return evidence
 }
 
-func autonomousRevisionContext(run *AutonomousRun) string {
+func agentRevisionContext(run *AgentRun) string {
 	if len(run.CandidateHistory) == 0 && len(run.UserRequirements) == 0 {
 		return ""
 	}
@@ -670,7 +670,7 @@ func autonomousRevisionContext(run *AutonomousRun) string {
 			start = 0
 		}
 		for index, candidate := range run.CandidateHistory[start:] {
-			fmt.Fprintf(&contextText, "\nCandidate %d:\n%s\n", start+index+1, truncateAutonomousText(candidate))
+			fmt.Fprintf(&contextText, "\nCandidate %d:\n%s\n", start+index+1, truncateAgentText(candidate))
 		}
 	}
 	if len(run.UserRequirements) > 0 {
@@ -682,7 +682,7 @@ func autonomousRevisionContext(run *AutonomousRun) string {
 	return strings.TrimSpace(contextText.String())
 }
 
-func evidenceSupportsCommand(events []AutonomousEvent, evidenceIDs []int, command string) bool {
+func evidenceSupportsCommand(events []AgentEvent, evidenceIDs []int, command string) bool {
 	for _, eventID := range evidenceIDs {
 		event := events[eventID-1]
 		fields := strings.Fields(event.Command)
@@ -693,15 +693,15 @@ func evidenceSupportsCommand(events []AutonomousEvent, evidenceIDs []int, comman
 	return false
 }
 
-func parseAutonomousAction(raw string) (ToolResponse, error) {
+func parseAgentAction(raw string) (ToolResponse, error) {
 	decoder := json.NewDecoder(strings.NewReader(strings.TrimSpace(raw)))
 	decoder.DisallowUnknownFields()
 	var action ToolResponse
 	if err := decoder.Decode(&action); err != nil {
-		return ToolResponse{}, fmt.Errorf("invalid autonomous action JSON: %w", err)
+		return ToolResponse{}, fmt.Errorf("invalid agent action JSON: %w", err)
 	}
 	if decoder.Decode(&struct{}{}) != io.EOF {
-		return ToolResponse{}, errors.New("autonomous response must contain exactly one JSON object")
+		return ToolResponse{}, errors.New("agent response must contain exactly one JSON object")
 	}
 	switch action.Action {
 	case "answer", "update_findings", "request_clarification":
@@ -709,7 +709,7 @@ func parseAutonomousAction(raw string) (ToolResponse, error) {
 			return ToolResponse{}, fmt.Errorf("action %q requires text", action.Action)
 		}
 	case "run_command", "run_command_bg":
-		if err := validateAutonomousCommand(action.Command); err != nil {
+		if err := validateAgentCommand(action.Command); err != nil {
 			return ToolResponse{}, err
 		}
 	case "check_job", "get_job", "cancel_job":
@@ -731,12 +731,12 @@ func parseAutonomousAction(raw string) (ToolResponse, error) {
 			return ToolResponse{}, errors.New("action complete_step requires a positive stepId")
 		}
 	default:
-		return ToolResponse{}, fmt.Errorf("unsupported autonomous action %q", action.Action)
+		return ToolResponse{}, fmt.Errorf("unsupported agent action %q", action.Action)
 	}
 	return action, nil
 }
 
-func validateAutonomousCommand(command string) error {
+func validateAgentCommand(command string) error {
 	command = sanitizeCommand(command)
 	if command == "" || strings.ContainsAny(command, "\n\r") {
 		return errors.New("command must be one non-empty line")
@@ -762,85 +762,85 @@ func validateAutonomousCommand(command string) error {
 	return nil
 }
 
-func executeAutonomousAction(ctx context.Context, sess *webSession, action ToolResponse) bool {
+func executeAgentAction(ctx context.Context, sess *webSession, action ToolResponse) bool {
 	switch action.Action {
 	case "answer":
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "answer", Action: action.Action, Text: action.Text, EvidenceEventIDs: action.EvidenceEventIDs})
+		sess.appendAgentEvent(AgentEvent{Kind: "answer", Action: action.Action, Text: action.Text, EvidenceEventIDs: action.EvidenceEventIDs})
 		sess.appendAgentMessage(ChatMessage{Role: "assistant", Content: action.Text})
 		sess.mu.Lock()
-		sess.AutonomousRun.CandidateHistory = append(sess.AutonomousRun.CandidateHistory, action.Text)
+		sess.AgentRun.CandidateHistory = append(sess.AgentRun.CandidateHistory, action.Text)
 		sess.AwaitingDecision = true
-		sess.AutonomousRun.Status = autonomousWaitingApproval
-		sess.AutonomousRun.FinalAnswer = action.Text
-		sess.AutonomousRun.UpdatedAt = time.Now().UTC()
+		sess.AgentRun.Status = agentWaitingApproval
+		sess.AgentRun.FinalAnswer = action.Text
+		sess.AgentRun.UpdatedAt = time.Now().UTC()
 		sess.mu.Unlock()
 		return false
 	case "request_clarification":
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "clarification", Action: action.Action, Text: action.Text})
+		sess.appendAgentEvent(AgentEvent{Kind: "clarification", Action: action.Action, Text: action.Text})
 		sess.mu.Lock()
 		sess.AwaitingDecision = true
-		sess.AutonomousRun.Status = autonomousWaitingInput
-		sess.AutonomousRun.UpdatedAt = time.Now().UTC()
+		sess.AgentRun.Status = agentWaitingInput
+		sess.AgentRun.UpdatedAt = time.Now().UTC()
 		sess.mu.Unlock()
 		return false
 	case "update_findings":
 		sess.mu.Lock()
 		sess.PartialFindings = action.Text
 		sess.mu.Unlock()
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Text: "Findings saved: " + action.Text})
+		sess.appendAgentEvent(AgentEvent{Kind: "observation", Action: action.Action, Text: "Findings saved: " + action.Text})
 		return true
 	case "create_plan":
-		plan := make([]AutonomousPlanStep, 0, len(action.Steps))
+		plan := make([]AgentPlanStep, 0, len(action.Steps))
 		for index, description := range action.Steps {
-			plan = append(plan, AutonomousPlanStep{ID: index + 1, Description: strings.TrimSpace(description), Status: "pending"})
+			plan = append(plan, AgentPlanStep{ID: index + 1, Description: strings.TrimSpace(description), Status: "pending"})
 		}
 		sess.mu.Lock()
-		sess.AutonomousRun.Plan = plan
+		sess.AgentRun.Plan = plan
 		sess.mu.Unlock()
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "plan", Action: action.Action, Text: strings.Join(action.Steps, "\n")})
+		sess.appendAgentEvent(AgentEvent{Kind: "plan", Action: action.Action, Text: strings.Join(action.Steps, "\n")})
 		return true
 	case "complete_step":
 		sess.mu.Lock()
-		step := &sess.AutonomousRun.Plan[action.StepID-1]
+		step := &sess.AgentRun.Plan[action.StepID-1]
 		step.Status = "completed"
 		step.EvidenceEventIDs = append([]int(nil), action.EvidenceEventIDs...)
 		sess.mu.Unlock()
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "plan", Action: action.Action, StepID: action.StepID, EvidenceEventIDs: action.EvidenceEventIDs, Text: fmt.Sprintf("Plan step %d completed", action.StepID)})
+		sess.appendAgentEvent(AgentEvent{Kind: "plan", Action: action.Action, StepID: action.StepID, EvidenceEventIDs: action.EvidenceEventIDs, Text: fmt.Sprintf("Plan step %d completed", action.StepID)})
 		return true
 	case "run_command":
-		commandCtx, cancel := context.WithTimeout(ctx, autonomousCommandTimeout)
-		output, success := runAutonomousCommand(commandCtx, action.Command)
+		commandCtx, cancel := context.WithTimeout(ctx, agentCommandTimeout)
+		output, success := runAgentCommand(commandCtx, action.Command)
 		cancel()
 		sess.mu.Lock()
 		sess.CommandCount++
 		sess.Stats.recordCommand(action.Command)
 		sess.mu.Unlock()
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Command: action.Command, Output: truncateAutonomousText(output), Success: success})
+		sess.appendAgentEvent(AgentEvent{Kind: "observation", Action: action.Action, Command: action.Command, Output: truncateAgentText(output), Success: success})
 		sess.appendAgentMessage(ChatMessage{Role: "assistant", Content: fmt.Sprintf("[Running]: %s\n[Command output]:\n%s", action.Command, output)})
 		return true
 	case "run_command_bg":
 		job, err := executeBackgroundCommand(sess.ID, action.Command)
 		if err != nil {
-			sess.appendAutonomousEvent(AutonomousEvent{Kind: "error", Action: action.Action, Text: err.Error()})
+			sess.appendAgentEvent(AgentEvent{Kind: "error", Action: action.Action, Text: err.Error()})
 			return true
 		}
-		if run := sess.autonomousSnapshot(); run != nil {
+		if run := sess.agentSnapshot(); run != nil {
 			job.RunID = run.ID
 			jobStore.update(job)
 		}
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Text: fmt.Sprintf("job %s started", job.ID)})
+		sess.appendAgentEvent(AgentEvent{Kind: "observation", Action: action.Action, Text: fmt.Sprintf("job %s started", job.ID)})
 		return true
 	case "check_job", "get_job":
 		job, ok := jobStore.get(action.JobID)
 		if !ok || job.SessionID != sess.ID {
-			sess.appendAutonomousEvent(AutonomousEvent{Kind: "error", Action: action.Action, Text: "job not found"})
+			sess.appendAgentEvent(AgentEvent{Kind: "error", Action: action.Action, Text: "job not found"})
 			return true
 		}
 		output := job.Output
 		if action.Action == "check_job" && len(output) > 1000 {
 			output = output[:1000] + "\n... (truncated)"
 		}
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Text: fmt.Sprintf("job %s status: %s\n", job.ID, job.Status), Output: truncateAutonomousText(output)})
+		sess.appendAgentEvent(AgentEvent{Kind: "observation", Action: action.Action, Text: fmt.Sprintf("job %s status: %s\n", job.ID, job.Status), Output: truncateAgentText(output)})
 		return true
 	case "cancel_job":
 		job, ok := jobStore.get(action.JobID)
@@ -850,7 +850,7 @@ func executeAutonomousAction(ctx context.Context, sess *webSession, action ToolR
 			job.EndTime = time.Now()
 			jobStore.update(job)
 		}
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Text: "job cancellation processed"})
+		sess.appendAgentEvent(AgentEvent{Kind: "observation", Action: action.Action, Text: "job cancellation processed"})
 		return true
 	case "list_jobs":
 		jobs := jobStore.listBySession(sess.ID)
@@ -861,13 +861,13 @@ func executeAutonomousAction(ctx context.Context, sess *webSession, action ToolR
 		if text.Len() == 0 {
 			text.WriteString("No jobs")
 		}
-		sess.appendAutonomousEvent(AutonomousEvent{Kind: "observation", Action: action.Action, Text: text.String()})
+		sess.appendAgentEvent(AgentEvent{Kind: "observation", Action: action.Action, Text: text.String()})
 		return true
 	}
 	return true
 }
 
-func runAutonomousCommand(ctx context.Context, command string) (string, bool) {
+func runAgentCommand(ctx context.Context, command string) (string, bool) {
 	command = sanitizeCommand(command)
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	var stdout, stderr bytes.Buffer
@@ -889,55 +889,55 @@ func runAutonomousCommand(ctx context.Context, command string) (string, bool) {
 	return output, err == nil && ctx.Err() == nil
 }
 
-func recordAutonomousFailure(sess *webSession, message string) bool {
+func recordAgentFailure(sess *webSession, message string) bool {
 	sess.mu.Lock()
-	if sess.AutonomousRun == nil {
+	if sess.AgentRun == nil {
 		sess.mu.Unlock()
 		return false
 	}
-	sess.AutonomousRun.ConsecutiveErrors++
-	failures := sess.AutonomousRun.ConsecutiveErrors
+	sess.AgentRun.ConsecutiveErrors++
+	failures := sess.AgentRun.ConsecutiveErrors
 	sess.mu.Unlock()
-	sess.appendAutonomousEvent(AutonomousEvent{Kind: "error", Text: message})
+	sess.appendAgentEvent(AgentEvent{Kind: "error", Text: message})
 	if failures >= 3 {
-		finishAutonomous(sess, autonomousFailed, "", message)
+		finishAgent(sess, agentFailed, "", message)
 		return false
 	}
 	return true
 }
 
-func recordAutonomousRevision(sess *webSession, message string, evidenceEventIDs []int) bool {
+func recordAgentRevision(sess *webSession, message string, evidenceEventIDs []int) bool {
 	sess.mu.Lock()
-	if sess.AutonomousRun == nil {
+	if sess.AgentRun == nil {
 		sess.mu.Unlock()
 		return false
 	}
-	sess.AutonomousRun.ConsecutiveErrors = 0
+	sess.AgentRun.ConsecutiveErrors = 0
 	sess.mu.Unlock()
-	sess.appendAutonomousEvent(AutonomousEvent{Kind: "verification", Action: "answer", Text: message, EvidenceEventIDs: evidenceEventIDs})
+	sess.appendAgentEvent(AgentEvent{Kind: "verification", Action: "answer", Text: message, EvidenceEventIDs: evidenceEventIDs})
 	return true
 }
 
-func resetAutonomousFailures(sess *webSession) {
+func resetAgentFailures(sess *webSession) {
 	sess.mu.Lock()
 	defer sess.mu.Unlock()
-	if sess.AutonomousRun != nil {
-		sess.AutonomousRun.ConsecutiveErrors = 0
+	if sess.AgentRun != nil {
+		sess.AgentRun.ConsecutiveErrors = 0
 	}
 }
 
-func finishAutonomous(sess *webSession, status AutonomousRunStatus, answer, errorText string) {
-	sess.finishAutonomousRun(status, answer, errorText)
+func finishAgent(sess *webSession, status AgentRunStatus, answer, errorText string) {
+	sess.finishAgentRun(status, answer, errorText)
 	text := errorText
 	if answer != "" {
 		text = answer
 	}
-	sess.appendAutonomousEvent(AutonomousEvent{Kind: "status", Text: string(status) + ": " + text})
-	cleanupAutonomousRunResources(sess)
+	sess.appendAgentEvent(AgentEvent{Kind: "status", Text: string(status) + ": " + text})
+	cleanupAgentRunResources(sess)
 }
 
-func cleanupAutonomousRunResources(sess *webSession) {
-	run := sess.autonomousSnapshot()
+func cleanupAgentRunResources(sess *webSession) {
+	run := sess.agentSnapshot()
 	if run != nil {
 		jobStore.cancelRun(run.ID)
 	}
@@ -945,21 +945,21 @@ func cleanupAutonomousRunResources(sess *webSession) {
 	attachmentPath := sess.AttachedFilePath
 	sess.AttachedFile = nil
 	sess.AttachedFilePath = ""
-	sess.AutonomousStart = 0
+	sess.AgentStart = 0
 	sess.AwaitingDecision = false
 	sess.mu.Unlock()
 	if attachmentPath != "" {
-		if dir, err := owrapAutonomousSessionDir(sess.ID); err == nil {
+		if dir, err := owrapAgentSessionDir(sess.ID); err == nil {
 			_ = os.RemoveAll(dir)
 		}
 	}
 }
 
-func truncateAutonomousText(text string) string {
-	if len(text) <= autonomousMaxObservation {
+func truncateAgentText(text string) string {
+	if len(text) <= agentMaxObservation {
 		return text
 	}
-	return text[:autonomousMaxObservation] + "\n... (truncated)"
+	return text[:agentMaxObservation] + "\n... (truncated)"
 }
 
 func (s *webSession) appendAgentMessage(message ChatMessage) {
@@ -967,8 +967,9 @@ func (s *webSession) appendAgentMessage(message ChatMessage) {
 	defer s.mu.Unlock()
 	s.Messages = append(s.Messages, message)
 	s.Stats.recordMessage(message)
+	s.Stats.updateContext(systemPrompt, s.Messages)
 }
 
-func logAutonomousError(sessionID string, err error) {
-	fmt.Printf("[AUTONOMOUS] session=%s persistence error: %v\n", sessionID, err)
+func logAgentError(sessionID string, err error) {
+	fmt.Printf("[AGENT] session=%s persistence error: %v\n", sessionID, err)
 }

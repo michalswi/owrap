@@ -17,9 +17,11 @@ COPY --chown=dummy Makefile Makefile
 COPY --chown=dummy main.go main.go
 COPY --chown=dummy banner.go banner.go
 COPY --chown=dummy comm.go comm.go
+COPY --chown=dummy fileextract.go fileextract.go
 COPY --chown=dummy help.go help.go
 COPY --chown=dummy vars.go vars.go
-COPY --chown=dummy autonomous.go autonomous.go
+COPY --chown=dummy agent_worker.go agent_worker.go
+COPY --chown=dummy agent_api.go agent_api.go
 
 COPY --chown=dummy go.mod go.mod
 COPY --chown=dummy go.sum go.sum

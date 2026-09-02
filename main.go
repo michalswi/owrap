@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -25,9 +26,10 @@ import (
 )
 
 type ChatMessage struct {
-	Role     string `json:"role"`
-	Content  string `json:"content"`
-	Thinking string `json:"thinking,omitempty"`
+	Role     string   `json:"role"`
+	Content  string   `json:"content"`
+	Thinking string   `json:"thinking,omitempty"`
+	Images   []string `json:"images,omitempty"` // base64-encoded images for vision models
 }
 
 //go:embed webstatic/*
@@ -39,23 +41,23 @@ type webSession struct {
 	Messages           []ChatMessage
 	CreatedAt          time.Time
 	Stats              Stats
-	AutonomousMode     bool
-	AutonomousGoal     string
+	AgentMode          bool
+	AgentGoal          string
 	OriginalPrompt     string
 	OriginalPromptName string
 	RetryCount         int
-	CommandCount       int             // Tracks commands executed in autonomous mode
+	CommandCount       int             // Tracks commands executed in agent mode
 	PartialFindings    string          // Stores completed parts of the goal to avoid re-running
 	LastCommands       []string        // Track last 3 commands to prevent duplicates
-	AttachedFile       *FileAttachment // File attached when starting autonomous mode
+	AttachedFile       *FileAttachment // File attached when starting agent mode
 	AttachedFilePath   string          // Temp path where file is stored on disk
 	AutoAnalyze        bool            // Per-session auto-analysis mode
 	ThinkingEnabled    bool            // Per-session Ollama thinking mode
-	AwaitingDecision   bool            // Candidate autonomous answer awaits user approval
-	AutonomousStart    int             // First message included in the current autonomous run
-	AutonomousRun      *AutonomousRun  `json:"autonomousRun,omitempty"`
-	autonomousCancel   context.CancelFunc
-	autonomousDone     chan struct{}
+	AwaitingDecision   bool            // Candidate agent answer awaits user approval
+	AgentStart         int             // First message included in the current agent run
+	AgentRun           *AgentRun       `json:"agentRun,omitempty"`
+	agentCancel        context.CancelFunc
+	agentDone          chan struct{}
 }
 
 type webSessionStore struct {
@@ -70,15 +72,15 @@ type persistedWebState struct {
 }
 
 type webStateResponse struct {
-	SessionID          string        `json:"sessionId"`
-	Messages           []ChatMessage `json:"messages"`
-	Stats              Stats         `json:"stats"`
-	Model              string        `json:"model"`
-	Prompt             string        `json:"prompt"`
-	Thinking           bool          `json:"thinking"`
-	AutonomousMode     bool          `json:"autonomousMode"`
-	AutonomousGoal     string        `json:"autonomousGoal,omitempty"`
-	AutonomousDecision bool          `json:"autonomousDecision,omitempty"`
+	SessionID     string        `json:"sessionId"`
+	Messages      []ChatMessage `json:"messages"`
+	Stats         Stats         `json:"stats"`
+	Model         string        `json:"model"`
+	Prompt        string        `json:"prompt"`
+	Thinking      bool          `json:"thinking"`
+	AgentMode     bool          `json:"agentMode"`
+	AgentGoal     string        `json:"agentGoal,omitempty"`
+	AgentDecision bool          `json:"agentDecision,omitempty"`
 }
 
 func newWebSessionStore() *webSessionStore {
@@ -142,8 +144,8 @@ func (s *webSessionStore) initializeFresh() error {
 	if err != nil {
 		return err
 	}
-	if err := os.RemoveAll(filepath.Join(baseDir, "autonomous_files")); err != nil {
-		return fmt.Errorf("failed to remove stale autonomous files: %w", err)
+	if err := os.RemoveAll(filepath.Join(baseDir, "agent_files")); err != nil {
+		return fmt.Errorf("failed to remove stale agent files: %w", err)
 	}
 	s.reset()
 	return s.persist()
@@ -308,32 +310,34 @@ type ToolResponse struct {
 }
 
 type webChatRequest struct {
-	SessionID        string `json:"sessionId"`
-	Message          string `json:"message"`
-	ResumeAutonomous bool   `json:"resumeAutonomous,omitempty"`
+	SessionID   string          `json:"sessionId"`
+	Message     string          `json:"message"`
+	ResumeAgent bool            `json:"resumeAgent,omitempty"`
+	Image       *FileAttachment `json:"image,omitempty"`
+	Attachment  *FileAttachment `json:"attachment,omitempty"` // non-image file (pdf/docx/pptx/doc/pcap); extracted server-side
 }
 
 type webChatResponse struct {
-	SessionID          string           `json:"sessionId"`
-	Action             string           `json:"action"`
-	AssistantText      string           `json:"assistantText,omitempty"`
-	Command            string           `json:"command,omitempty"`
-	CommandOutput      string           `json:"commandOutput,omitempty"`
-	Raw                string           `json:"raw,omitempty"`
-	Messages           []ChatMessage    `json:"messages"`
-	Model              string           `json:"model"`
-	Timestamp          time.Time        `json:"timestamp"`
-	Stats              Stats            `json:"stats"`
-	Thinking           string           `json:"thinking,omitempty"`
-	ThinkingEnabled    bool             `json:"thinkingEnabled"`
-	AutonomousMode     bool             `json:"autonomousMode,omitempty"`
-	AutonomousContinue bool             `json:"autonomousContinue,omitempty"`
-	AutonomousDecision bool             `json:"autonomousDecision,omitempty"`
-	AutonomousStop     bool             `json:"autonomousStop,omitempty"`
-	CommandCount       int              `json:"commandCount,omitempty"` // Commands executed in autonomous mode
-	JobID              string           `json:"jobId,omitempty"`
-	JobStatus          string           `json:"jobStatus,omitempty"`
-	Jobs               []*BackgroundJob `json:"jobs,omitempty"`
+	SessionID       string           `json:"sessionId"`
+	Action          string           `json:"action"`
+	AssistantText   string           `json:"assistantText,omitempty"`
+	Command         string           `json:"command,omitempty"`
+	CommandOutput   string           `json:"commandOutput,omitempty"`
+	Raw             string           `json:"raw,omitempty"`
+	Messages        []ChatMessage    `json:"messages"`
+	Model           string           `json:"model"`
+	Timestamp       time.Time        `json:"timestamp"`
+	Stats           Stats            `json:"stats"`
+	Thinking        string           `json:"thinking,omitempty"`
+	ThinkingEnabled bool             `json:"thinkingEnabled"`
+	AgentMode       bool             `json:"agentMode,omitempty"`
+	AgentContinue   bool             `json:"agentContinue,omitempty"`
+	AgentDecision   bool             `json:"agentDecision,omitempty"`
+	AgentStop       bool             `json:"agentStop,omitempty"`
+	CommandCount    int              `json:"commandCount,omitempty"` // Commands executed in agent mode
+	JobID           string           `json:"jobId,omitempty"`
+	JobStatus       string           `json:"jobStatus,omitempty"`
+	Jobs            []*BackgroundJob `json:"jobs,omitempty"`
 }
 
 type webCommandRequest struct {
@@ -349,15 +353,15 @@ type webCommandResponse struct {
 func recoverableWebError(sess *webSession, text string) webChatResponse {
 	sess.appendMessage("assistant", text)
 	return webChatResponse{
-		SessionID:          sess.ID,
-		Action:             "error",
-		AssistantText:      text,
-		Messages:           sess.Messages,
-		Model:              modelName,
-		Timestamp:          time.Now().UTC(),
-		Stats:              sess.Stats,
-		AutonomousMode:     sess.AutonomousMode,
-		AutonomousContinue: sess.AutonomousMode,
+		SessionID:     sess.ID,
+		Action:        "error",
+		AssistantText: text,
+		Messages:      sess.Messages,
+		Model:         modelName,
+		Timestamp:     time.Now().UTC(),
+		Stats:         sess.Stats,
+		AgentMode:     sess.AgentMode,
+		AgentContinue: sess.AgentMode,
 	}
 }
 
@@ -432,10 +436,41 @@ func (s *webSession) appendContextMessage(role, content string) {
 }
 
 func (s *webSession) modelMessages() []ChatMessage {
-	if s.AutonomousMode && s.AutonomousStart >= 0 && s.AutonomousStart <= len(s.Messages) {
-		return s.Messages[s.AutonomousStart:]
+	if s.AgentMode && s.AgentStart >= 0 && s.AgentStart <= len(s.Messages) {
+		return s.Messages[s.AgentStart:]
 	}
 	return s.Messages
+}
+
+// mergeAttachmentIntoMessage decodes a base64 file attachment, extracts readable text
+// server-side (PDF/DOCX/PPTX/DOC/PCAP or plain text), and folds it into the user message.
+func mergeAttachmentIntoMessage(message string, attachment *FileAttachment) string {
+	fileInfo := fmt.Sprintf("[File: %s, Size: %.1f KB]", attachment.Name, float64(attachment.Size)/1024)
+	if strings.TrimSpace(message) == "" {
+		message = "Please analyze this file."
+	}
+
+	raw, err := base64.StdEncoding.DecodeString(attachment.Content)
+	if err != nil {
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to decode attachment: %v", message, fileInfo, err)
+	}
+
+	tmp, err := os.CreateTemp("", "owrap-attach-*"+strings.ToLower(filepath.Ext(attachment.Name)))
+	if err != nil {
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to stage attachment: %v", message, fileInfo, err)
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(raw); err != nil {
+		tmp.Close()
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to stage attachment: %v", message, fileInfo, err)
+	}
+	tmp.Close()
+
+	extracted, err := ExtractTextFromFile(tmp.Name())
+	if err != nil {
+		return fmt.Sprintf("%s\n\n%s\n\nFailed to extract file content: %v", message, fileInfo, err)
+	}
+	return fmt.Sprintf("%s\n\n%s\n\n%s", message, fileInfo, extracted)
 }
 
 func appendTerminalMessage(messages *[]ChatMessage, stats *Stats, role, content string) {
@@ -867,12 +902,12 @@ func owrapSessionsDir() (string, error) {
 	return filepath.Join(baseDir, "sessions"), nil
 }
 
-func owrapAutonomousSessionDir(sessionID string) (string, error) {
+func owrapAgentSessionDir(sessionID string) (string, error) {
 	baseDir, err := owrapHomeDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(baseDir, "autonomous_files", sessionID), nil
+	return filepath.Join(baseDir, "agent_files", sessionID), nil
 }
 
 func owrapWebStatePath() (string, error) {
@@ -912,10 +947,10 @@ func startWebUI(bindAddr string) error {
 	mux.HandleFunc("/api/prompts/update", handleUpdatePrompt)
 	mux.HandleFunc("/api/help", handleWebHelp)
 	mux.HandleFunc("/api/command", handleWebCommand)
-	mux.HandleFunc("/api/autonomous/start", handleAutonomousStart)
-	mux.HandleFunc("/api/autonomous/stop", handleAutonomousStop)
-	mux.HandleFunc("/api/autonomous/status", handleAutonomousStatus)
-	mux.HandleFunc("/api/autonomous/decision", handleAutonomousDecision)
+	mux.HandleFunc("/api/agent/start", handleAgentStart)
+	mux.HandleFunc("/api/agent/stop", handleAgentStop)
+	mux.HandleFunc("/api/agent/status", handleAgentStatus)
+	mux.HandleFunc("/api/agent/decision", handleAgentDecision)
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	mux.HandleFunc("/api/ollama/status", handleOllamaStatus)
 
@@ -933,15 +968,15 @@ func handleWebState(w http.ResponseWriter, r *http.Request) {
 		sess := webStore.ensure("")
 		sess.Stats.updateContext(systemPrompt, sess.Messages)
 		writeJSON(w, http.StatusOK, webStateResponse{
-			SessionID:          sess.ID,
-			Messages:           sess.Messages,
-			Stats:              sess.Stats,
-			Model:              modelName,
-			Prompt:             systemPromptName,
-			Thinking:           sess.ThinkingEnabled,
-			AutonomousMode:     sess.AutonomousMode,
-			AutonomousGoal:     sess.AutonomousGoal,
-			AutonomousDecision: sess.AwaitingDecision,
+			SessionID:     sess.ID,
+			Messages:      sess.Messages,
+			Stats:         sess.Stats,
+			Model:         modelName,
+			Prompt:        systemPromptName,
+			Thinking:      sess.ThinkingEnabled,
+			AgentMode:     sess.AgentMode,
+			AgentGoal:     sess.AgentGoal,
+			AgentDecision: sess.AwaitingDecision,
 		})
 	case http.MethodDelete:
 		sess := webStore.reset()
@@ -951,15 +986,15 @@ func handleWebState(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, http.StatusOK, webStateResponse{
-			SessionID:          sess.ID,
-			Messages:           sess.Messages,
-			Stats:              sess.Stats,
-			Model:              modelName,
-			Prompt:             systemPromptName,
-			Thinking:           sess.ThinkingEnabled,
-			AutonomousMode:     sess.AutonomousMode,
-			AutonomousGoal:     sess.AutonomousGoal,
-			AutonomousDecision: sess.AwaitingDecision,
+			SessionID:     sess.ID,
+			Messages:      sess.Messages,
+			Stats:         sess.Stats,
+			Model:         modelName,
+			Prompt:        systemPromptName,
+			Thinking:      sess.ThinkingEnabled,
+			AgentMode:     sess.AgentMode,
+			AgentGoal:     sess.AgentGoal,
+			AgentDecision: sess.AwaitingDecision,
 		})
 	default:
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1134,8 +1169,8 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sess := webStore.ensure(req.SessionID)
-	if sess.AutonomousMode {
-		http.Error(w, "autonomous run active; use the autonomous status and decision APIs", http.StatusConflict)
+	if sess.AgentMode {
+		http.Error(w, "agent run active; use the agent status and decision APIs", http.StatusConflict)
 		return
 	}
 	defer func() {
@@ -1144,7 +1179,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	log.Printf("[CHAT] Session %s, autonomous: %v", sess.ID, sess.AutonomousMode)
+	log.Printf("[CHAT] Session %s, agent: %v", sess.ID, sess.AgentMode)
 
 	lower := strings.ToLower(strings.TrimSpace(req.Message))
 	switch lower {
@@ -1365,15 +1400,25 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.Attachment != nil && req.Attachment.Content != "" {
+		req.Message = mergeAttachmentIntoMessage(req.Message, req.Attachment)
+	}
 	sess.appendMessage("user", req.Message)
+	if req.Image != nil && strings.HasPrefix(req.Image.Type, "image/") && req.Image.Content != "" {
+		sess.mu.Lock()
+		if len(sess.Messages) > 0 {
+			sess.Messages[len(sess.Messages)-1].Images = []string{req.Image.Content}
+		}
+		sess.mu.Unlock()
+	}
 
 	contextMessages := sess.modelMessages()
 	messages := make([]ChatMessage, 0, len(contextMessages)+1)
 	messages = append(messages, ChatMessage{Role: "system", Content: systemPrompt})
 	messages = append(messages, contextMessages...)
 
-	// Force JSON mode only in autonomous mode
-	forceJSON := sess.AutonomousMode
+	// Force JSON mode only in agent mode
+	forceJSON := sess.AgentMode
 	requestStarted := time.Now()
 	ollamaMessage, err := callOllamaMessageWithLogContext(r.Context(), "web-chat:"+sess.ID, messages, forceJSON, sess.ThinkingEnabled)
 	sess.Stats.recordResponseDuration(time.Since(requestStarted))
@@ -1406,14 +1451,14 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 	var tool ToolResponse
 	if err := json.Unmarshal([]byte(clean), &tool); err != nil {
-		// In autonomous mode, if JSON parsing fails, force agent to correct itself
-		if sess.AutonomousMode {
-			response := handleAutonomousJSONError(sess, raw, clean, err)
+		// In agent mode, if JSON parsing fails, force agent to correct itself
+		if sess.AgentMode {
+			response := handleAgentJSONError(sess, raw, clean, err)
 			writeJSON(w, http.StatusOK, response)
 			return
 		}
 
-		// Non-autonomous mode: just show the raw output
+		// Non-agent mode: just show the raw output
 		sess.appendAssistant(raw, ollamaMessage.Thinking)
 		writeJSON(w, http.StatusOK, webChatResponse{
 			SessionID:       sess.ID,
@@ -1447,14 +1492,14 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		messageContent := "✓ Result:\n" + out
 		sess.appendMessage("assistant", messageContent)
 
-		// Autonomous mode: increment counter and generate summary
-		if sess.AutonomousMode {
-			response := handleAutonomousCommand(sess, tool, messageContent, out, messages)
+		// Agent mode: increment counter and generate summary
+		if sess.AgentMode {
+			response := handleAgentCommand(sess, tool, messageContent, out, messages)
 			writeJSON(w, http.StatusOK, response)
 			return
 		}
 
-		// Non-autonomous mode: optional auto-analysis
+		// Non-agent mode: optional auto-analysis
 		combined := messageContent
 		log.Printf("[AUTO-ANALYSIS] sess.AutoAnalyze=%v for session %s", sess.AutoAnalyze, sess.ID)
 		if sess.AutoAnalyze {
@@ -1529,21 +1574,21 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		messageContent := fmt.Sprintf("Started background job: %s\nCommand: %s\nStatus: %s", job.ID, job.Command, job.Status)
 		sess.appendMessage("assistant", messageContent)
 
-		autoContinue := sess.AutonomousMode
+		autoContinue := sess.AgentMode
 
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:          sess.ID,
-			Action:             "run_command_bg",
-			AssistantText:      messageContent,
-			Command:            tool.Command,
-			JobID:              job.ID,
-			JobStatus:          job.Status,
-			Messages:           sess.Messages,
-			Model:              modelName,
-			Timestamp:          time.Now().UTC(),
-			Stats:              sess.Stats,
-			AutonomousMode:     sess.AutonomousMode,
-			AutonomousContinue: autoContinue,
+			SessionID:     sess.ID,
+			Action:        "run_command_bg",
+			AssistantText: messageContent,
+			Command:       tool.Command,
+			JobID:         job.ID,
+			JobStatus:     job.Status,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+			AgentMode:     sess.AgentMode,
+			AgentContinue: autoContinue,
 		})
 
 	case "check_job":
@@ -1565,21 +1610,21 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 		sess.appendMessage("assistant", messageContent)
 
-		autoContinue := sess.AutonomousMode
+		autoContinue := sess.AgentMode
 
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:          sess.ID,
-			Action:             "check_job",
-			AssistantText:      messageContent,
-			JobID:              job.ID,
-			JobStatus:          job.Status,
-			CommandOutput:      partialOutput,
-			Messages:           sess.Messages,
-			Model:              modelName,
-			Timestamp:          time.Now().UTC(),
-			Stats:              sess.Stats,
-			AutonomousMode:     sess.AutonomousMode,
-			AutonomousContinue: autoContinue,
+			SessionID:     sess.ID,
+			Action:        "check_job",
+			AssistantText: messageContent,
+			JobID:         job.ID,
+			JobStatus:     job.Status,
+			CommandOutput: partialOutput,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+			AgentMode:     sess.AgentMode,
+			AgentContinue: autoContinue,
 		})
 
 	case "get_job":
@@ -1603,21 +1648,21 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		}
 		sess.appendMessage("assistant", messageContent)
 
-		autoContinue := sess.AutonomousMode
+		autoContinue := sess.AgentMode
 
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:          sess.ID,
-			Action:             "get_job",
-			AssistantText:      messageContent,
-			JobID:              job.ID,
-			JobStatus:          job.Status,
-			CommandOutput:      job.Output,
-			Messages:           sess.Messages,
-			Model:              modelName,
-			Timestamp:          time.Now().UTC(),
-			Stats:              sess.Stats,
-			AutonomousMode:     sess.AutonomousMode,
-			AutonomousContinue: autoContinue,
+			SessionID:     sess.ID,
+			Action:        "get_job",
+			AssistantText: messageContent,
+			JobID:         job.ID,
+			JobStatus:     job.Status,
+			CommandOutput: job.Output,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+			AgentMode:     sess.AgentMode,
+			AgentContinue: autoContinue,
 		})
 
 	case "cancel_job":
@@ -1637,17 +1682,17 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 			sess.appendMessage("assistant", content)
 
 			writeJSON(w, http.StatusOK, webChatResponse{
-				SessionID:          sess.ID,
-				Action:             "cancel_job",
-				AssistantText:      content,
-				JobID:              job.ID,
-				JobStatus:          job.Status,
-				Messages:           sess.Messages,
-				Model:              modelName,
-				Timestamp:          time.Now().UTC(),
-				Stats:              sess.Stats,
-				AutonomousMode:     sess.AutonomousMode,
-				AutonomousContinue: sess.AutonomousMode,
+				SessionID:     sess.ID,
+				Action:        "cancel_job",
+				AssistantText: content,
+				JobID:         job.ID,
+				JobStatus:     job.Status,
+				Messages:      sess.Messages,
+				Model:         modelName,
+				Timestamp:     time.Now().UTC(),
+				Stats:         sess.Stats,
+				AgentMode:     sess.AgentMode,
+				AgentContinue: sess.AgentMode,
 			})
 		} else {
 			content := fmt.Sprintf("Job %s is not running (status: %s)", job.ID, job.Status)
@@ -1682,16 +1727,16 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		sess.appendMessage("assistant", content)
 
 		writeJSON(w, http.StatusOK, webChatResponse{
-			SessionID:          sess.ID,
-			Action:             "list_jobs",
-			AssistantText:      content,
-			Jobs:               jobs,
-			Messages:           sess.Messages,
-			Model:              modelName,
-			Timestamp:          time.Now().UTC(),
-			Stats:              sess.Stats,
-			AutonomousMode:     sess.AutonomousMode,
-			AutonomousContinue: sess.AutonomousMode,
+			SessionID:     sess.ID,
+			Action:        "list_jobs",
+			AssistantText: content,
+			Jobs:          jobs,
+			Messages:      sess.Messages,
+			Model:         modelName,
+			Timestamp:     time.Now().UTC(),
+			Stats:         sess.Stats,
+			AgentMode:     sess.AgentMode,
+			AgentContinue: sess.AgentMode,
 		})
 
 	case "update_findings":
@@ -1701,7 +1746,7 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 
 	case "answer":
 		sess.RetryCount = 0
-		response := handleAutonomousAnswer(sess, tool)
+		response := handleAgentAnswer(sess, tool)
 		if ollamaMessage.Thinking != "" && len(sess.Messages) > 0 {
 			last := &sess.Messages[len(sess.Messages)-1]
 			last.Thinking = ollamaMessage.Thinking
@@ -1715,8 +1760,8 @@ func handleWebChat(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, response)
 
 	default:
-		if sess.AutonomousMode {
-			response := handleAutonomousJSONError(sess, raw, clean, fmt.Errorf("unsupported autonomous action %q", tool.Action))
+		if sess.AgentMode {
+			response := handleAgentJSONError(sess, raw, clean, fmt.Errorf("unsupported agent action %q", tool.Action))
 			writeJSON(w, http.StatusOK, response)
 			return
 		}
