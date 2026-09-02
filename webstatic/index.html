@@ -58,12 +58,11 @@
       --terminal-text: #f5f6f7;
     }
     * { box-sizing: border-box; }
-    html { min-height: 100%; }
+    html, body { height: 100%; }
     body {
-      min-height: 100vh;
       margin: 0;
       padding: 0;
-      overflow-x: hidden;
+      overflow: hidden;
       color: var(--text);
       font-family: "Avenir Next", "SF Pro Display", -apple-system, BlinkMacSystemFont, sans-serif;
       letter-spacing: 0;
@@ -76,10 +75,13 @@
     button { cursor: pointer; }
     button:disabled { opacity: 0.55; cursor: not-allowed; }
     .row { display: flex; align-items: center; }
-    .desktop { width: 100%; margin: 0; }
+    .desktop { width: 100%; height: 100vh; margin: 0; display: flex; flex-direction: column; overflow: hidden; }
     .app-window {
-      min-height: 100vh;
-      overflow: visible;
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
       background: transparent;
       border: 0;
       border-radius: 0;
@@ -164,7 +166,7 @@
       overflow: hidden;
       text-overflow: ellipsis;
     }
-    main { max-width: none; margin: 0; padding: 18px; }
+    main { max-width: none; margin: 0; padding: 18px; flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
     .save-notice {
       margin-bottom: 12px !important;
       padding: 8px 11px !important;
@@ -186,15 +188,16 @@
     }
     #autonomousGoalBanner > div:first-child { margin-bottom: 0 !important; }
     #activeJobsContainer { border-radius: 6px !important; }
-    .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 14px; align-items: start; }
-    .conversation-column, .utility-column { display: grid; gap: 14px; min-width: 0; }
+    .workspace-grid { display: grid; grid-template-columns: minmax(0, 1fr) 350px; gap: 14px; align-items: stretch; flex: 1; min-height: 0; }
+    .conversation-column { display: grid; grid-template-rows: minmax(0, 1fr) auto; gap: 14px; min-width: 0; min-height: 0; }
+    .utility-column { display: grid; gap: 14px; min-width: 0; min-height: 0; overflow-y: auto; align-content: start; }
     .panel, .terminal-panel {
       background: var(--panel);
       border: 1px solid var(--border);
       border-radius: 8px;
       box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     }
-    .terminal-panel { overflow: hidden; background: var(--terminal); border-color: var(--terminal-border); }
+    .terminal-panel { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--terminal); border-color: var(--terminal-border); }
     .panel-titlebar {
       height: 36px;
       padding: 0 12px;
@@ -209,8 +212,8 @@
     .terminal-dots { display: flex; gap: 5px; }
     .terminal-dots span { width: 6px; height: 6px; border-radius: 50%; background: #555a62; }
     #log {
-      min-height: 500px;
-      max-height: 64vh;
+      flex: 1;
+      min-height: 0;
       padding: 16px;
       overflow-y: auto;
       color: var(--terminal-text);
@@ -318,11 +321,10 @@
     .spinner.visible { display: inline-block; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .stats-panel { padding: 0; overflow: hidden; }
-    .stats-header { min-height: 40px; margin: 0 !important; padding: 0 12px; }
+    .stats-header { min-height: 40px; margin: 0 !important; padding: 0 12px; cursor: pointer; }
+    .stats-header:hover h3 { color: var(--accent); }
     .stats-header h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; }
-    #statsToggle { font-size: 12px !important; }
-    .stats-grid { display: grid; padding: 0 12px 12px; grid-template-columns: 1fr 1fr; gap: 7px; }
-    .stats-grid.collapsed { display: none; }
+    .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
     .stat-card {
       min-width: 0;
       padding: 10px;
@@ -339,8 +341,9 @@
     .stat-value { margin: 4px 0 1px; color: var(--text); font-size: 23px; font-weight: 650; }
     .stat-sub { font-size: 9px; line-height: 1.4; }
     .stat-span-2 { grid-column: span 2; }
-    #modalOverlay { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(15,18,22,0.42); backdrop-filter: blur(12px); }
+    #modalOverlay { position: fixed; inset: 0; z-index: 999; display: none; align-items: center; justify-content: center; padding: 20px; background: rgba(15,18,22,0.18); }
     #modalOverlay.show { display: flex; }
+    body.modal-open main, body.modal-open .utility-column { overflow: hidden !important; }
     .modal-card {
       width: min(92vw, 680px);
       max-height: min(86vh, 760px);
@@ -365,6 +368,8 @@
       flex: 0 0 auto;
       background: var(--titlebar);
       border-bottom: 1px solid var(--border);
+      cursor: move;
+      user-select: none;
     }
     .modal-title { min-width: 0; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
     .modal-close {
@@ -400,9 +405,11 @@
       overflow-wrap: anywhere;
     }
     @media (max-width: 980px) {
+      main { overflow-y: auto; }
       .workspace-grid { grid-template-columns: 1fr; }
-      .utility-column { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-      #log { min-height: 420px; }
+      .conversation-column { grid-template-rows: none; }
+      .utility-column { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; overflow-y: visible; }
+      #log { flex: none; min-height: 420px; }
     }
     @media (max-width: 700px) {
       header { position: static; min-height: 58px; align-items: center; padding: 10px 12px; }
@@ -655,9 +662,11 @@
             <div class="row" style="gap:8px; align-items: center;">
               <h3 style="margin:0; color: var(--text);">Session stats</h3>
             </div>
-            <span id="statsToggle" style="color: var(--muted);">▼</span>
+            <span style="color: var(--muted);" title="Open session stats">⤢</span>
           </div>
-          <div class="stats-grid collapsed" id="statsGrid">
+        </div>
+        <div id="statsGridHolder" style="display: none;">
+          <div class="stats-grid" id="statsGrid">
             <div class="stat-card">
               <div class="stat-top"><div class="stat-label">User messages</div><span class="stat-tag">you</span></div>
               <div class="stat-value" id="statUserMessages">0</div>
@@ -732,7 +741,7 @@
     const modalClose = document.getElementById('modalClose');
     const statsHeader = document.getElementById('statsHeader');
     const statsGrid = document.getElementById('statsGrid');
-    const statsToggle = document.getElementById('statsToggle');
+    const statsGridHolder = document.getElementById('statsGridHolder');
     const ollamaStatusLight = document.getElementById('ollamaStatus');
     const ollamaStatusText = document.getElementById('ollamaStatusText');
     const themeToggle = document.getElementById('themeToggle');
@@ -777,19 +786,51 @@
     let thinkingEnabled = false;
 
     statsHeader.addEventListener('click', () => {
-      statsGrid.classList.toggle('collapsed');
-      statsToggle.textContent = statsGrid.classList.contains('collapsed') ? '▼' : '▲';
+      showModal('Session stats', '');
+      modalBody.appendChild(statsGrid);
     });
 
     function showModal(title, bodyHtml) {
       modalTitle.textContent = title;
       modalBody.innerHTML = bodyHtml;
+      modalCard.style.position = '';
+      modalCard.style.left = '';
+      modalCard.style.top = '';
+      modalCard.style.margin = '';
       modalOverlay.classList.add('show');
+      document.body.classList.add('modal-open');
     }
 
     function closeModal() {
       modalOverlay.classList.remove('show');
+      document.body.classList.remove('modal-open');
+      if (statsGrid.parentElement === modalBody) statsGridHolder.appendChild(statsGrid);
     }
+
+    const modalCard = document.querySelector('#modalOverlay .modal-card');
+    const modalHeader = document.querySelector('#modalOverlay .modal-header');
+    let modalDrag = null;
+
+    modalHeader.addEventListener('mousedown', (e) => {
+      if (e.target.closest('#modalClose')) return;
+      const rect = modalCard.getBoundingClientRect();
+      modalDrag = { startX: e.clientX, startY: e.clientY, startLeft: rect.left, startTop: rect.top };
+      modalCard.style.position = 'fixed';
+      modalCard.style.margin = '0';
+      modalCard.style.left = rect.left + 'px';
+      modalCard.style.top = rect.top + 'px';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!modalDrag) return;
+      modalCard.style.left = (modalDrag.startLeft + e.clientX - modalDrag.startX) + 'px';
+      modalCard.style.top = (modalDrag.startTop + e.clientY - modalDrag.startY) + 'px';
+    });
+    document.addEventListener('mouseup', () => {
+      modalDrag = null;
+      document.body.style.userSelect = '';
+    });
 
     modalClose.addEventListener('click', closeModal);
     modalOverlay.addEventListener('click', (e) => {
